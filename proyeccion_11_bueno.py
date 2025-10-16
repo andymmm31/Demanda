@@ -2896,9 +2896,6 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, per
         umbral_corr = umbral_sugerido
     regresores = identificar_regresores_no_lineales(df_original_tratada, target_variable=columna_energia, threshold=umbral_corr, metodo=metodo_corr)
 
-    eventos_especiales = params_ejecucion['eventos_especiales']
-    growth_type = params_ejecucion['growth_type']
-
     print("\n8. PREPARANDO DATOS PARA PROPHET")
     print("------------------------------")
     df_prophet = preparar_datos_para_prophet(df_original_tratada, columna_energia, regresores, growth_type, frecuencia)
@@ -2920,7 +2917,9 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, per
                 regresores.append(cp_col_prophet)
                 print(f"  Regresor '{cp_col_prophet}' añadido a Prophet.")
 
-    ajuste_adicional = params_ejecucion['ajuste_adicional_prophet']
+    # La variable ajuste_adicional_prophet se define a partir del input del usuario al inicio de la función.
+    # Esta línea ya no es necesaria.
+    ajuste_adicional = ajuste_adicional_prophet
 
     # --- Bloque de Entrenamiento de Prophet con Lógica Condicional ---
     if growth_type == 'linear':
