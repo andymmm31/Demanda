@@ -1533,12 +1533,13 @@ def entrenar_modelo_prophet_continuo(df, modelo_anterior=None, regresores=None, 
                     seasonal = pd.Series(np.zeros(len(regressor_series)), index=regressor_series.index)
 
                 # 2. Extrapolar la tendencia
-                # Usar los últimos puntos de la tendencia para el modelo lineal
-                puntos_tendencia_fit = min(seasonal_period, len(trend))
-                if puntos_tendencia_fit < 2:
+                # Usar una porción significativa de la tendencia (75%) para un ajuste más robusto
+                puntos_tendencia_fit = max(2, int(len(trend) * 0.75))
+                if len(trend) < 2:
                     print(f"    Advertencia: No hay suficientes puntos de tendencia para '{r_name}'. Usando la media.")
                     future_trend = np.full(periodos_futuros, trend.mean() if not trend.empty else 0)
                 else:
+                    print(f"    Ajustando tendencia del regresor '{r_name}' con {puntos_tendencia_fit} puntos (75% del total).")
                     X_trend = np.arange(len(trend)).reshape(-1, 1)[-puntos_tendencia_fit:]
                     y_trend = trend.values[-puntos_tendencia_fit:]
 
