@@ -45,7 +45,6 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.cluster import KMeans
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.model_selection import ParameterGrid
-from sklearn.linear_model import LinearRegression
 
 # Statsmodels
 from statsmodels.tsa.stattools import adfuller
@@ -75,6 +74,8 @@ from tensorflow.keras import backend as K
 # TQDM for progress bars
 from tqdm.notebook import tqdm
 from tqdm import tqdm as tqdm_cli
+
+# TensorFlow and Keras
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
@@ -138,13 +139,13 @@ def crear_dataset_secuencial(data, time_steps=12):
         y.append(data[i + time_steps])
     return np.array(X), np.array(y)
 
-def detectar_y_tratar_outliers(df, columna_energia, metodo='iqr', factor_iqr=1.5, estrategia_tratamiento='cap'):
+def detectar_y_tratar_outliers(df, columna='Energía', metodo='iqr', factor_iqr=1.5, estrategia_tratamiento='cap'):
     """
     Detecta y trata valores atípicos en una columna del DataFrame.
 
     Args:
         df (pd.DataFrame): DataFrame de entrada.
-        columna_energia (str): Nombre de la columna de energía a analizar.
+        columna (str): Nombre de la columna a analizar.
         metodo (str): 'iqr' para Rango Intercuartílico, 'zscore' para Z-score.
         factor_iqr (float): Factor para el método IQR (usualmente 1.5 o 3).
         estrategia_tratamiento (str): 'cap' para capar, 'nan' para reemplazar con NaN.
@@ -152,9 +153,9 @@ def detectar_y_tratar_outliers(df, columna_energia, metodo='iqr', factor_iqr=1.5
     Returns:
         pd.DataFrame: DataFrame con outliers tratados.
     """
-    print(f"\nDetectando y tratando outliers en la columna '{columna_energia}' usando método '{metodo}'...")
+    print(f"\nDetectando y tratando outliers en la columna '{columna}' usando método '{metodo}'...")
     df_tratado = df.copy()
-    data_col = df_tratado[columna_energia].copy()
+    data_col = df_tratado[columna].copy()
     outliers_detectados = 0
 
     if metodo == 'iqr':
@@ -170,11 +171,11 @@ def detectar_y_tratar_outliers(df, columna_energia, metodo='iqr', factor_iqr=1.5
         outliers_detectados = outliers_idx_inf.sum() + outliers_idx_sup.sum()
 
         if estrategia_tratamiento == 'cap':
-            df_tratado.loc[outliers_idx_inf, columna_energia] = limite_inferior
-            df_tratado.loc[outliers_idx_sup, columna_energia] = limite_superior
+            df_tratado.loc[outliers_idx_inf, columna] = limite_inferior
+            df_tratado.loc[outliers_idx_sup, columna] = limite_superior
             print(f"  {outliers_detectados} outliers capeados.")
         elif estrategia_tratamiento == 'nan':
-            df_tratado.loc[outliers_idx_inf | outliers_idx_sup, columna_energia] = np.nan
+            df_tratado.loc[outliers_idx_inf | outliers_idx_sup, columna] = np.nan
             print(f"  {outliers_detectados} outliers reemplazados con NaN.")
 
     elif metodo == 'zscore':
@@ -193,11 +194,11 @@ def detectar_y_tratar_outliers(df, columna_energia, metodo='iqr', factor_iqr=1.5
             std_sin_outliers = data_col[~data_col.index.isin(outliers_original_idx)].std()
             limite_inferior = media_sin_outliers - umbral_z * std_sin_outliers
             limite_superior = media_sin_outliers + umbral_z * std_sin_outliers
-            df_tratado.loc[df_tratado.index.isin(outliers_original_idx) & (df_tratado[columna_energia] < limite_inferior), columna_energia] = limite_inferior
-            df_tratado.loc[df_tratado.index.isin(outliers_original_idx) & (df_tratado[columna_energia] > limite_superior), columna_energia] = limite_superior
+            df_tratado.loc[df_tratado.index.isin(outliers_original_idx) & (df_tratado[columna] < limite_inferior), columna] = limite_inferior
+            df_tratado.loc[df_tratado.index.isin(outliers_original_idx) & (df_tratado[columna] > limite_superior), columna] = limite_superior
             print(f"  {outliers_detectados} outliers capeados (Z-score).")
         elif estrategia_tratamiento == 'nan':
-            df_tratado.loc[df_tratado.index.isin(outliers_original_idx), columna_energia] = np.nan
+            df_tratado.loc[df_tratado.index.isin(outliers_original_idx), columna] = np.nan
             print(f"  {outliers_detectados} outliers reemplazados con NaN (Z-score).")
     else:
         print(f"Método '{metodo}' no reconocido. No se trataron outliers.")
@@ -206,11 +207,11 @@ def detectar_y_tratar_outliers(df, columna_energia, metodo='iqr', factor_iqr=1.5
     if outliers_detectados > 1:
         plt.figure(figsize=(15, 6))
         plt.subplot(1, 2, 1)
-        df[columna_energia].plot(label='Original', legend=True)
-        plt.title(f'Serie Original para {columna_energia}')
+        df[columna].plot(label='Original', legend=True)
+        plt.title('Serie Original')
         plt.subplot(1, 2, 2)
-        df_tratado[columna_energia].plot(label='Tratada', legend=True, color='orange')
-        plt.title(f'Serie Tratada para {columna_energia} (Outliers: {estrategia_tratamiento})')
+        df_tratado[columna].plot(label='Tratada', legend=True, color='orange')
+        plt.title(f'Serie Tratada (Outliers: {estrategia_tratamiento})')
         plt.tight_layout()
         plt.show()
 
@@ -259,10 +260,8 @@ def cargar_datos_desde_drive(ruta_archivo=None, id_datos=None):
             print(f"Formato de archivo no soportado: {ruta_archivo}")
             return None, None, None
 
-        columnas_requeridas = ['Date', 'residencial', 'comercial', 'industrial', 'otros', 'alumbrado publico']
-        columnas_faltantes = [col for col in columnas_requeridas if col not in df.columns]
-        if columnas_faltantes:
-            print(f"Error: Faltan las siguientes columnas en el archivo: {columnas_faltantes}")
+        if 'Date' not in df.columns or 'Energía' not in df.columns:
+            print("El archivo debe contener las columnas 'Date' y 'Energía'")
             return None, None, None
 
         df['Date'] = pd.to_datetime(df['Date'])
@@ -321,30 +320,30 @@ def detectar_frecuencia_datos(df):
     else:
         return 'superior a mensual'
 
-def analisis_estadistico_energia(df, columna_energia, frecuencia='mensual'):
+def analisis_estadistico_energia(df, columna='Energía', frecuencia='mensual'):
     """
-    Realiza análisis estadístico de la variable de energía adaptado a diferentes frecuencias.
+    Realiza análisis estadístico de la variable de energía adaptado a diferentes frecuencias
 
     Args:
-        df: DataFrame con los datos.
-        columna_energia: Nombre de la columna a analizar.
-        frecuencia: Frecuencia de los datos ('mensual', 'diario', 'horario', etc.).
+        df: DataFrame con los datos
+        columna: Nombre de la columna a analizar
+        frecuencia: Frecuencia de los datos ('mensual', 'diario', 'horario', etc.)
 
     Returns:
-        dict: Diccionario con métricas estadísticas.
+        dict: Diccionario con métricas estadísticas
     """
-    print(f"\nAnálisis estadístico de la serie temporal para '{columna_energia}':")
+    print("\nAnálisis estadístico de la serie temporal de energía:")
 
-    no_numericos = df[columna_energia].apply(lambda x: not isinstance(x, (int, float))).sum()
+    no_numericos = df[columna].apply(lambda x: not isinstance(x, (int, float))).sum()
     if no_numericos > 0:
-        print(f"  Advertencia: {no_numericos} valores no numéricos encontrados en la columna {columna_energia}")
+        print(f"  Advertencia: {no_numericos} valores no numéricos encontrados en columna {columna}")
         try:
-            df[columna_energia] = pd.to_numeric(df[columna_energia], errors='coerce')
+            df[columna] = pd.to_numeric(df[columna], errors='coerce')
             print("  Se intentó convertir valores a numéricos. Algunos podrían haberse convertido a NaN.")
-        except Exception as e:
-            print(f"  No se pudieron convertir todos los valores a numéricos: {e}")
+        except:
+            print("  No se pudieron convertir todos los valores a numéricos.")
 
-    stats = df[columna_energia].describe()
+    stats = df[columna].describe()
     for stat_name, value in stats.items():
         if isinstance(value, (int, float)):
             print(f"  {stat_name}: {value:.2f}")
@@ -353,7 +352,7 @@ def analisis_estadistico_energia(df, columna_energia, frecuencia='mensual'):
 
     df_temp = df.copy()
     df_temp['time_idx'] = range(len(df_temp))
-    tendencia_corr = df_temp['time_idx'].corr(df_temp[columna_energia])
+    tendencia_corr = df_temp['time_idx'].corr(df_temp[columna])
     print(f"\nCorrelación con el tiempo (tendencia): {tendencia_corr:.4f}")
 
     if tendencia_corr > 0.7: print("  La serie muestra una fuerte tendencia creciente")
@@ -363,16 +362,16 @@ def analisis_estadistico_energia(df, columna_energia, frecuencia='mensual'):
     else: print("  La serie no muestra una tendencia clara")
 
     plt.figure(figsize=(15, 6))
-    plt.plot(df['Date'], df[columna_energia], marker='o', linestyle='-', markersize=3)
-    plt.title(f'Serie Temporal de {columna_energia}'); plt.xlabel('Fecha'); plt.ylabel(columna_energia)
+    plt.plot(df['Date'], df[columna], marker='o', linestyle='-', markersize=3)
+    plt.title(f'Serie Temporal de {columna}'); plt.xlabel('Fecha'); plt.ylabel(columna)
     plt.grid(True); plt.tight_layout(); plt.show()
 
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
-    plt.hist(df[columna_energia].dropna(), bins=20, alpha=0.7, color='skyblue')
-    plt.title(f'Histograma de {columna_energia}'); plt.xlabel(columna_energia); plt.ylabel('Frecuencia')
+    plt.hist(df[columna], bins=20, alpha=0.7, color='skyblue')
+    plt.title(f'Histograma de {columna}'); plt.xlabel(columna); plt.ylabel('Frecuencia')
     plt.subplot(1, 2, 2)
-    plt.boxplot(df[columna_energia].dropna()); plt.title(f'Boxplot de {columna_energia}')
+    plt.boxplot(df[columna]); plt.title(f'Boxplot de {columna}')
     plt.tight_layout(); plt.show()
 
     try:
@@ -390,15 +389,15 @@ def analisis_estadistico_energia(df, columna_energia, frecuencia='mensual'):
             etiquetas = [str(i+1) for i in range(12)]
 
         if len(df) >= datos_minimos:
-            periodo_avg = df_temp.groupby('periodo')[columna_energia].mean()
+            periodo_avg = df_temp.groupby('periodo')[columna].mean()
             plt.figure(figsize=(12, 6))
             if len(periodo_avg) < len(etiquetas):
                 indices_completos = list(range(len(etiquetas)))
                 valores_completos = [periodo_avg.get(i, 0) for i in indices_completos]
                 periodo_avg = pd.Series(valores_completos, index=indices_completos)
             periodo_avg.plot(kind='bar', color='skyblue')
-            plt.title(f'Patrón Estacional (Promedio por {periodo_nombre} de {columna_energia})')
-            plt.xlabel(periodo_nombre.capitalize()); plt.ylabel(f'Promedio de {columna_energia}')
+            plt.title(f'Patrón Estacional (Promedio por {periodo_nombre} de {columna})')
+            plt.xlabel(periodo_nombre.capitalize()); plt.ylabel(f'Promedio de {columna}')
             plt.xticks(range(len(etiquetas)), etiquetas)
             plt.grid(True, axis='y'); plt.tight_layout(); plt.show()
 
@@ -477,35 +476,33 @@ def sugerir_umbral_correlacion(df, target_variable, metodo='spearman'):
         umbral_alto, umbral_medio, umbral_bajo = 0.6, 0.4, 0.2
     return umbral_alto, umbral_medio, umbral_bajo
 
-def identificar_regresores_no_lineales(df, target_variable, threshold=0.3, metodo='spearman'):
+def identificar_regresores_no_lineales(df, target_variable='Energía', threshold=0.3, metodo='spearman'):
     """
-    Identifica variables con correlación significativa que pueden servir como regresores.
+    Identifica variables con correlación significativa que pueden servir como regresores
 
     Args:
-        df: DataFrame con los datos.
-        target_variable: Variable objetivo para la correlación.
-        threshold: Umbral de correlación para seleccionar variables.
-        metodo: Método de correlación ('spearman' o 'kendall').
+        df: DataFrame con los datos
+        target_variable: Variable objetivo para la correlación
+        threshold: Umbral de correlación para seleccionar variables
+        metodo: Método de correlación (spearman o kendall)
 
     Returns:
-        list: Lista de nombres de variables seleccionadas como regresores.
+        list: Lista de nombres de variables seleccionadas como regresores
     """
     cols_numericas = df.select_dtypes(include=['float64', 'int64']).columns.tolist()
     cols_numericas = [col for col in cols_numericas if col != target_variable]
     regresores, correlaciones = [], {}
-    print(f"\nIdentificando regresores potenciales para '{target_variable}' (umbral = {threshold:.3f})...")
+    print(f"\nIdentificando regresores potenciales (umbral = {threshold:.3f})...")
     for col in cols_numericas:
         corr = abs(df[col].corr(df[target_variable], method=metodo))
         correlaciones[col] = corr
-        if corr >= threshold:
-            regresores.append(col)
+        if corr >= threshold: regresores.append(col)
 
     correlaciones_ordenadas = sorted(correlaciones.items(), key=lambda x: x[1], reverse=True)
     plt.figure(figsize=(12, 8))
     bars = plt.barh([x[0] for x in correlaciones_ordenadas], [x[1] for x in correlaciones_ordenadas], alpha=0.7)
     for i, (var, corr) in enumerate(correlaciones_ordenadas):
-        if corr >= threshold:
-            bars[i].set_color('green')
+        if corr >= threshold: bars[i].set_color('green')
     plt.axvline(x=threshold, color='red', linestyle='--', label=f'Umbral ({threshold:.3f})')
     plt.title(f'Correlación {metodo.capitalize()} con {target_variable}')
     plt.xlabel(f'Correlación Absoluta ({metodo})'); plt.ylabel('Variables')
@@ -513,35 +510,34 @@ def identificar_regresores_no_lineales(df, target_variable, threshold=0.3, metod
 
     if regresores:
         print("\nVariables seleccionadas como regresores:")
-        for var in regresores:
-            print(f"  - {var} (correlación: {correlaciones[var]:.3f})")
+        for var in regresores: print(f"  - {var} (correlación: {correlaciones[var]:.3f})")
     else:
-        print("\nNinguna variable supera el umbral de correlación establecido.")
+        print("\nNinguna variable supera el umbral de correlación establecido")
     return regresores
 
-def detectar_cambios_estructurales(df, columna_energia, ventana=None, umbral_z=2.5, vis_detalle=True, frecuencia='mensual'):
+def detectar_cambios_estructurales(df, columna='Energía', ventana=None, umbral_z=2.5, vis_detalle=True, frecuencia='mensual'):
     """
-    Detecta cambios estructurales en la serie temporal adaptado a diferentes frecuencias.
+    Detecta cambios estructurales en la serie temporal adaptado a diferentes frecuencias
 
     Args:
-        df: DataFrame con los datos.
-        columna_energia: Nombre de la columna a analizar.
-        ventana: Tamaño de ventana para cálculo de medias móviles (se ajusta según frecuencia si es None).
-        umbral_z: Umbral de score z para considerar un cambio estructural.
-        vis_detalle: Si se deben visualizar detalles del análisis.
-        frecuencia: Frecuencia de los datos ('mensual', 'diario', 'horario', etc.).
+        df: DataFrame con los datos
+        columna: Nombre de la columna a analizar
+        ventana: Tamaño de ventana para cálculo de medias móviles (se ajusta según frecuencia si es None)
+        umbral_z: Umbral de score z para considerar un cambio estructural
+        vis_detalle: Si se deben visualizar detalles del análisis
+        frecuencia: Frecuencia de los datos ('mensual', 'diario', 'horario', etc.)
 
     Returns:
-        list: Lista con fechas de cambios estructurales detectados.
+        list: Lista con fechas de cambios estructurales detectados
     """
     if ventana is None:
         if frecuencia == 'mensual': ventana = 24
         elif frecuencia == 'diario': ventana = 60
         elif frecuencia in ['horario', 'sub-horario']: ventana = 24 * 7
         else: ventana = 24
-    print(f"Usando ventana de {ventana} periodos para detección de cambios estructurales en '{columna_energia}'.")
+    print(f"Usando ventana de {ventana} periodos para detección de cambios estructurales.")
 
-    serie, fechas = df[columna_energia].copy(), df['Date'].copy()
+    serie, fechas = df[columna].copy(), df['Date'].copy()
     media_movil = serie.rolling(window=ventana).mean()
     std_movil = serie.rolling(window=ventana).std()
     diff_media = media_movil.diff()
@@ -655,22 +651,21 @@ def definir_eventos_especiales(frecuencia='mensual'):
     else:
         print("No se definieron eventos especiales"); return None
 
-def preparar_datos_para_prophet(df, columna_energia, regresores=None, growth_type='linear', frecuencia='mensual'):
+def preparar_datos_para_prophet(df, regresores=None, growth_type='linear', frecuencia='mensual'):
     """
-    Prepara los datos para su uso con Prophet con cálculo automático de capacidad.
-    Adaptado para soportar diferentes frecuencias de datos.
+    Prepara los datos para su uso con Prophet con cálculo automático de capacidad
+    Adaptado para soportar diferentes frecuencias de datos
 
     Args:
-        df: DataFrame con los datos.
-        columna_energia: Nombre de la columna de energía a usar como target.
-        regresores: Lista de nombres de columnas a usar como regresores.
-        growth_type: Tipo de crecimiento ('linear' o 'logistic').
-        frecuencia: Frecuencia de los datos ('mensual', 'diario', 'horario').
+        df: DataFrame con los datos
+        regresores: Lista de nombres de columnas a usar como regresores
+        growth_type: Tipo de crecimiento ('linear' o 'logistic')
+        frecuencia: Frecuencia de los datos ('mensual', 'diario', 'horario')
 
     Returns:
-        DataFrame: DataFrame formateado para Prophet.
+        DataFrame: DataFrame formateado para Prophet
     """
-    df_prophet = df[['Date', columna_energia]].copy()
+    df_prophet = df[['Date', 'Energía']].copy()
     df_prophet.columns = ['ds', 'y']
 
     if growth_type == 'logistic':
@@ -945,7 +940,7 @@ def guardar_modelo_y_metricas(modelo, metricas, forecast, params, regresores,
         with open(ruta_mejor_modelo, 'wb') as file: pickle.dump(modelo_actual_info, file)
         print("Primer modelo guardado como mejor modelo")
 
-def guardar_modelo_ensamblado(modelos, forecast_combinado, metricas_modelos, pesos, id_datos=None, columna_energia=None):
+def guardar_modelo_ensamblado(modelos, forecast_combinado, metricas_modelos, pesos, id_datos=None):
     """
     Guarda el modelo ensamblado y sus componentes de manera mejorada.
 
@@ -955,7 +950,6 @@ def guardar_modelo_ensamblado(modelos, forecast_combinado, metricas_modelos, pes
         metricas_modelos: Diccionario con métricas de rendimiento.
         pesos: Diccionario con pesos para cada tipo de modelo en el ensamble.
         id_datos: Identificador único del conjunto de datos.
-        columna_energia (str, optional): Nombre de la columna de energía para nombrar archivos.
     """
     if not os.path.exists('modelos_ensamblados'):
         os.makedirs('modelos_ensamblados')
@@ -968,7 +962,7 @@ def guardar_modelo_ensamblado(modelos, forecast_combinado, metricas_modelos, pes
         'fecha_creacion': now_str,
         'metricas': metricas_modelos,
         'forecast': forecast_combinado,
-        'configuracion': {'pesos_ensamble': pesos, 'columna_energia': columna_energia},
+        'configuracion': {'pesos_ensamble': pesos},
         'id_datos': id_datos,
         'modelo_prophet_serializado': None,
         'modelos_rnn_info': {'paths': {}}
@@ -985,9 +979,7 @@ def guardar_modelo_ensamblado(modelos, forecast_combinado, metricas_modelos, pes
     for mkey, mname, is_keras in [('gru', 'GRU', True), ('wavenet', 'WaveNet', True), ('gbr', 'GBR', False)]:
         if mkey in modelos and modelos[mkey] is not None:
             try:
-                # Añadir el nombre de la columna de energía al path del modelo
-                file_suffix = f"_{columna_energia}" if columna_energia else ""
-                m_path_base = f'modelos_avanzados/modelo_{mkey}{file_suffix}'
+                m_path_base = f'modelos_avanzados/modelo_{mkey}'
                 if id_datos:
                     m_path = f'{m_path_base}_{id_datos}'
                 else:
@@ -1002,14 +994,13 @@ def guardar_modelo_ensamblado(modelos, forecast_combinado, metricas_modelos, pes
                         pickle.dump(modelos[mkey], f)
 
                 paths[mkey] = m_path
-                print(f"Modelo {mname} para '{columna_energia}' guardado en: {m_path}")
+                print(f"Modelo {mname} guardado en: {m_path}")
             except Exception as e:
-                print(f"Error al guardar modelo {mname} para '{columna_energia}': {str(e)}")
+                print(f"Error al guardar modelo {mname}: {str(e)}")
                 paths[mkey] = None
 
-    file_suffix = f"_{columna_energia}" if columna_energia else ""
-    ruta_actual_ensamblado = f'modelos_ensamblados/modelo_ensamblado{file_suffix}_{id_datos}_{timestamp}.pkl' if id_datos else f'modelos_ensamblados/modelo_ensamblado{file_suffix}_{timestamp}.pkl'
-    ruta_mejor_ensamblado = f'modelos_ensamblados/mejor_modelo_ensamblado{file_suffix}_{id_datos}.pkl' if id_datos else f'modelos_ensamblados/mejor_modelo_ensamblado{file_suffix}.pkl'
+    ruta_actual_ensamblado = f'modelos_ensamblados/modelo_ensamblado_{id_datos}_{timestamp}.pkl' if id_datos else f'modelos_ensamblados/modelo_ensamblado_{timestamp}.pkl'
+    ruta_mejor_ensamblado = f'modelos_ensamblados/mejor_modelo_ensamblado_{id_datos}.pkl' if id_datos else 'modelos_ensamblados/mejor_modelo_ensamblado.pkl'
 
     with open(ruta_actual_ensamblado, 'wb') as file:
         pickle.dump(modelo_ensamblado_info, file)
@@ -1083,13 +1074,14 @@ def entrenar_modelo_prophet(df, regresores=None, growth_type='logistic', eventos
     future = model.make_future_dataframe(periods=periodos_futuros, freq=freq_prophet)
     if growth_type == 'logistic': future['cap'] = df['cap'].max() if 'cap' in df.columns else df['y'].quantile(0.95) * 2
     if regresores:
-        for r_name in regresores:
-            if r_name in df.columns:
+        for r in regresores:
+            if r in df.columns:
                 p_avg = 12 if frecuencia == 'mensual' else 30 if frecuencia == 'diario' else 24*7 if frecuencia in ['horario', 'sub-horario'] else max(1, len(df) // 10)
-                last_val = df[r_name].rolling(window=p_avg).mean().iloc[-1] if len(df) >= p_avg else df[r_name].mean()
-                future[r_name] = future['ds'].map(lambda x: last_val if x > df['ds'].max() else (df.loc[df['ds'] == x, r_name].iloc[0] if x in df['ds'].values else np.nan))
-                future[r_name] = future[r_name].interpolate(method='linear').fillna(last_val)
+                last_val = df[r].rolling(window=p_avg).mean().iloc[-1] if len(df) >= p_avg else df[r].mean()
+                future[r] = future['ds'].map(lambda x: last_val if x > df['ds'].max() else (df.loc[df['ds'] == x, r].iloc[0] if x in df['ds'].values else np.nan))
+                future[r] = future[r].interpolate(method='linear').fillna(last_val)
     forecast = model.predict(future)
+
     if ajuste_adicional:
         print("Aplicando ajustes adicionales...");
         p_adj = 12 if frecuencia == 'mensual' else 30 if frecuencia == 'diario' else 24*7 if frecuencia in ['horario', 'sub-horario'] else max(1, len(df) // 10)
@@ -1112,60 +1104,26 @@ def entrenar_modelo_prophet(df, regresores=None, growth_type='logistic', eventos
     metricas_dict = {'RMSE': rmse, 'MAE': mae, 'R2': r2, 'MAPE': mape}
     return model, forecast, metricas_dict
 
-def _entrenar_prophet_silencioso(df_in, regresores_in, growth_in, eventos_in, params_in):
-    """
-    Función auxiliar privada para entrenar un modelo Prophet sin visualizaciones.
-    Utilizada internamente por las funciones de optimización de hiperparámetros.
-    """
-    if params_in is None:
-        params_in = {
-            'changepoint_prior_scale': 0.01, 'seasonality_prior_scale': 10.0,
-            'holidays_prior_scale': 10.0, 'seasonality_mode': 'additive',
-            'changepoint_range': 0.8
-        }
-
-    model = Prophet(
-        changepoint_prior_scale=params_in.get('changepoint_prior_scale', 0.01),
-        seasonality_prior_scale=params_in.get('seasonality_prior_scale', 10.0),
-        holidays_prior_scale=params_in.get('holidays_prior_scale', 10.0),
-        seasonality_mode=params_in.get('seasonality_mode', 'additive'),
-        changepoint_range=params_in.get('changepoint_range', 0.8),
-        growth=growth_in,
-        daily_seasonality=False,
-        weekly_seasonality=False
-    )
-
-    if growth_in == 'logistic' and 'cap' not in df_in.columns:
-        df_in['cap'] = df_in['y'].quantile(0.95) * 2
-
-    if regresores_in:
-        for r in regresores_in:
-            if r in df_in.columns:
-                model.add_regressor(r)
-
-    model.add_seasonality(name='yearly', period=365.25, fourier_order=10)
-    if eventos_in is not None:
-        model.holidays = eventos_in
-
-    model.fit(df_in)
-    fc_train = model.predict(df_in)
-    y_t, y_p = df_in['y'], fc_train['yhat']
-
-    rmse = np.sqrt(mean_squared_error(y_t, y_p))
-    metrics = {
-        'RMSE': rmse,
-        'MAE': mean_absolute_error(y_t, y_p),
-        'R2': r2_score(y_t, y_p),
-        'MAPE': mean_absolute_percentage_error(y_t, y_p)
-    }
-    return model, metrics
-
-
 def optimizar_hiperparametros(df, regresores=None, growth_type='logistic', eventos=None):
     """
     Optimiza los hiperparámetros de Prophet sin mostrar visualizaciones intermedias
     """
     print("\nIniciando optimización de hiperparámetros por etapas...")
+    def entrenar_prophet_silencioso(df_in, regresores_in, growth_in, eventos_in, params_in):
+        if params_in is None: params_in = {'changepoint_prior_scale': 0.01, 'seasonality_prior_scale': 10.0, 'holidays_prior_scale': 10.0, 'seasonality_mode': 'additive', 'changepoint_range': 0.8}
+        model = Prophet(changepoint_prior_scale=params_in.get('changepoint_prior_scale',0.01), seasonality_prior_scale=params_in.get('seasonality_prior_scale',10.0), holidays_prior_scale=params_in.get('holidays_prior_scale',10.0), seasonality_mode=params_in.get('seasonality_mode','additive'), changepoint_range=params_in.get('changepoint_range',0.8), growth=growth_in, daily_seasonality=False, weekly_seasonality=False)
+        if growth_in == 'logistic' and 'cap' not in df_in.columns: df_in['cap'] = df_in['y'].quantile(0.95) * 2
+        if regresores_in:
+            for r in regresores_in:
+                if r in df_in.columns: model.add_regressor(r)
+        model.add_seasonality(name='yearly', period=365.25, fourier_order=10)
+        if eventos_in is not None: model.holidays = eventos_in
+        model.fit(df_in)
+        fc_train = model.predict(df_in)
+        y_t, y_p = df_in['y'], fc_train['yhat']
+        rmse = np.sqrt(mean_squared_error(y_t, y_p))
+        return model, {'RMSE': rmse, 'MAE': mean_absolute_error(y_t, y_p), 'R2': r2_score(y_t, y_p), 'MAPE': mean_absolute_percentage_error(y_t, y_p)}
+
     param_grid1 = {'changepoint_prior_scale': [0.001, 0.01, 0.1], 'seasonality_prior_scale': [0.1, 10.0, 100.0], 'holidays_prior_scale': [0.1, 10.0], 'seasonality_mode': ['additive', 'multiplicative'], 'changepoint_range': [0.8, 0.9]}
     all_params1 = [dict(zip(param_grid1.keys(), v)) for v in product(*param_grid1.values())]
     print(f"\nETAPA 1: Búsqueda dispersa ({len(all_params1)} combinaciones)")
@@ -1174,63 +1132,43 @@ def optimizar_hiperparametros(df, regresores=None, growth_type='logistic', event
     pbar1 = get_progress_bar(total=len(all_params1), desc="Etapa 1", position=0, leave=True)
     for i, params in enumerate(all_params1):
         pbar1.set_description(f"Prueba {i+1}/{len(all_params1)}")
-        try:
-            _, metrics = _entrenar_prophet_silencioso(df, regresores, growth_type, eventos, params)
-            results1.append({'params': params, 'rmse': metrics['RMSE']})
-            pbar1.set_postfix(RMSE=f"{metrics['RMSE']:.4f}")
-        except Exception as e:
-            print(f"Error con parámetros {params}: {str(e)}")
+        try: _, metrics = entrenar_prophet_silencioso(df, regresores, growth_type, eventos, params); results1.append({'params': params, 'rmse': metrics['RMSE']}); pbar1.set_postfix(RMSE=f"{metrics['RMSE']:.4f}")
+        except Exception as e: print(f"Error {params}: {str(e)}")
         pbar1.update(1)
-    pbar1.close()
-    results1.sort(key=lambda x: x['rmse'])
+    pbar1.close(); results1.sort(key=lambda x: x['rmse'])
     best_params1 = results1[:3]
-    print("\nMejores resultados de la Etapa 1:")
-    for i, r in enumerate(best_params1):
-        print(f"  {i+1}. RMSE: {r['rmse']:.4f}, Params: {r['params']}")
+    print("\nMejores Etapa 1:"); [print(f"  {i+1}. RMSE: {r['rmse']:.4f}, Params: {r['params']}") for i, r in enumerate(best_params1)]
 
     cp_vals, sp_vals, h_vals, sm_vals, cr_vals = set(), set(), set(), set(), set()
     for res in best_params1:
         p = res['params']
-        cp_vals.update([p['changepoint_prior_scale'], max(0.001, p['changepoint_prior_scale']*0.5), min(0.5, p['changepoint_prior_scale']*2)])
-        sp_vals.update([p['seasonality_prior_scale'], max(0.01, p['seasonality_prior_scale']*0.5), min(200., p['seasonality_prior_scale']*2)])
-        h_vals.update([p['holidays_prior_scale'], max(0.01, p['holidays_prior_scale']*0.5), min(20., p['holidays_prior_scale']*2)])
+        cp_vals.update([p['changepoint_prior_scale'], max(0.001,p['changepoint_prior_scale']*0.5), min(0.5,p['changepoint_prior_scale']*2)])
+        sp_vals.update([p['seasonality_prior_scale'], max(0.01,p['seasonality_prior_scale']*0.5), min(200.,p['seasonality_prior_scale']*2)])
+        h_vals.update([p['holidays_prior_scale'], max(0.01,p['holidays_prior_scale']*0.5), min(20.,p['holidays_prior_scale']*2)])
         sm_vals.add(p['seasonality_mode'])
-        cr_vals.update([p['changepoint_range'], max(0.6, p['changepoint_range']-0.05), min(0.95, p['changepoint_range']+0.05)])
-
-    param_grid2 = {
-        'changepoint_prior_scale': sorted(list(cp_vals)),
-        'seasonality_prior_scale': sorted(list(sp_vals)),
-        'holidays_prior_scale': sorted(list(h_vals)),
-        'seasonality_mode': list(sm_vals),
-        'changepoint_range': sorted(list(cr_vals))
-    }
+        cr_vals.update([p['changepoint_range'], max(0.6,p['changepoint_range']-0.05), min(0.95,p['changepoint_range']+0.05)])
+    param_grid2 = {'changepoint_prior_scale': sorted(list(cp_vals)), 'seasonality_prior_scale': sorted(list(sp_vals)), 'holidays_prior_scale': sorted(list(h_vals)), 'seasonality_mode': list(sm_vals), 'changepoint_range': sorted(list(cr_vals))}
     all_params2 = [dict(zip(param_grid2.keys(), v)) for v in product(*param_grid2.values())]
     print(f"\nETAPA 2: Refinamiento ({len(all_params2)} combinaciones)")
     results2 = []
     pbar2 = get_progress_bar(total=len(all_params2), desc="Etapa 2", position=0, leave=True)
     for i, params in enumerate(all_params2):
         pbar2.set_description(f"Prueba {i+1}/{len(all_params2)}")
-        try:
-            m, met = _entrenar_prophet_silencioso(df, regresores, growth_type, eventos, params)
-            results2.append({'params': params, 'model': m, 'rmse': met['RMSE']})
-            pbar2.set_postfix(RMSE=f"{met['RMSE']:.4f}")
-        except Exception as e:
-            print(f"Error con parámetros {params}: {str(e)}")
+        try: m, met = entrenar_prophet_silencioso(df, regresores, growth_type, eventos, params); results2.append({'params': params, 'model': m, 'rmse': met['RMSE']}); pbar2.set_postfix(RMSE=f"{met['RMSE']:.4f}")
+        except Exception as e: print(f"Error {params}: {str(e)}")
         pbar2.update(1)
     pbar2.close()
 
     if results2:
         best_res = min(results2, key=lambda x: x['rmse'])
-        print("\nMejores hiperparámetros encontrados (optimización por etapas):")
-        for p, v in best_res['params'].items():
-            print(f"  {p}: {v}")
+        print("\nMejores hiperparámetros (optimización por etapas):"); [print(f"  {p}: {v}") for p,v in best_res['params'].items()]
         print(f"\nMejor RMSE: {best_res['rmse']:.4f}")
         print("\nEntrenando modelo final con los mejores parámetros...")
         mf, ff, metf = entrenar_modelo_prophet(df, regresores, growth_type, eventos, best_res['params'], 120, True, True)
         return best_res['params'], mf, best_res['rmse']
     else:
-        print("No se encontraron hiperparámetros óptimos. Usando valores por defecto.")
-        def_params = {'changepoint_prior_scale': 0.01, 'seasonality_prior_scale': 10., 'holidays_prior_scale': 10., 'seasonality_mode': 'additive', 'changepoint_range': 0.8}
+        print("No se encontraron hiperparámetros óptimos. Usando por defecto.")
+        def_params = {'changepoint_prior_scale':0.01, 'seasonality_prior_scale':10., 'holidays_prior_scale':10., 'seasonality_mode':'additive', 'changepoint_range':0.8}
         m, f, met = entrenar_modelo_prophet(df, regresores, growth_type, eventos, def_params, 120, True, True)
         return def_params, m, met['RMSE']
 
@@ -1271,34 +1209,42 @@ def optimizar_hiperparametros_refinados(df, param_grid, regresores=None, growth_
         tuple: (Mejores parámetros, Mejor modelo, Mejor RMSE)
     """
     print("\nIniciando optimización con grid refinado...")
+    def entrenar_prophet_silencioso(df_in, regresores_in, growth_in, eventos_in, params_in): # Copied from optimizar_hiperparametros
+        if params_in is None: params_in = {'changepoint_prior_scale': 0.01, 'seasonality_prior_scale': 10.0, 'holidays_prior_scale': 10.0, 'seasonality_mode': 'additive', 'changepoint_range': 0.8}
+        model = Prophet(changepoint_prior_scale=params_in.get('changepoint_prior_scale',0.01), seasonality_prior_scale=params_in.get('seasonality_prior_scale',10.0), holidays_prior_scale=params_in.get('holidays_prior_scale',10.0), seasonality_mode=params_in.get('seasonality_mode','additive'), changepoint_range=params_in.get('changepoint_range',0.8), growth=growth_in, daily_seasonality=False, weekly_seasonality=False)
+        if growth_in == 'logistic' and 'cap' not in df_in.columns: df_in['cap'] = df_in['y'].quantile(0.95) * 2
+        if regresores_in:
+            for r in regresores_in:
+                if r in df_in.columns: model.add_regressor(r)
+        model.add_seasonality(name='yearly', period=365.25, fourier_order=10)
+        if eventos_in is not None: model.holidays = eventos_in
+        model.fit(df_in)
+        fc_train = model.predict(df_in)
+        y_t, y_p = df_in['y'], fc_train['yhat']
+        rmse = np.sqrt(mean_squared_error(y_t, y_p))
+        return model, {'RMSE': rmse, 'MAE': mean_absolute_error(y_t, y_p), 'R2': r2_score(y_t, y_p), 'MAPE': mean_absolute_percentage_error(y_t, y_p)}
+
     all_params = [dict(zip(param_grid.keys(), v)) for v in product(*param_grid.values())]
     print(f"Se evaluarán {len(all_params)} combinaciones")
     results = []
-    if growth_type == 'logistic' and 'cap' not in df.columns:
-        df['cap'] = df['y'].quantile(0.95) * 2
+    if growth_type == 'logistic' and 'cap' not in df.columns: df['cap'] = df['y'].quantile(0.95) * 2
     pbar = get_progress_bar(total=len(all_params), desc="Optimizando", position=0, leave=True)
     for i, params in enumerate(all_params):
         pbar.set_description(f"Prueba {i+1}/{len(all_params)}")
-        try:
-            m, met = _entrenar_prophet_silencioso(df, regresores, growth_type, eventos, params)
-            results.append({'params': params, 'model': m, 'rmse': met['RMSE']})
-            pbar.set_postfix(RMSE=f"{met['RMSE']:.4f}")
-        except Exception as e:
-            print(f"Error con parámetros {params}: {str(e)}")
+        try: m, met = entrenar_prophet_silencioso(df, regresores, growth_type, eventos, params); results.append({'params': params, 'model': m, 'rmse': met['RMSE']}); pbar.set_postfix(RMSE=f"{met['RMSE']:.4f}")
+        except Exception as e: print(f"Error {params}: {str(e)}")
         pbar.update(1)
     pbar.close()
 
     if results:
         best_res = min(results, key=lambda x: x['rmse'])
-        print("\nMejores hiperparámetros encontrados:")
-        for p, v in best_res['params'].items():
-            print(f"  {p}: {v}")
+        print("\nMejores hiperparámetros encontrados:"); [print(f"  {p}: {v}") for p,v in best_res['params'].items()]
         print(f"\nMejor RMSE: {best_res['rmse']:.4f}")
         return best_res['params'], best_res['model'], best_res['rmse']
     else:
-        print("No se encontraron hiperparámetros óptimos. Usando valores por defecto.")
-        def_params = {'changepoint_prior_scale': 0.01, 'seasonality_prior_scale': 10., 'holidays_prior_scale': 10., 'seasonality_mode': 'additive', 'changepoint_range': 0.8}
-        m, met = _entrenar_prophet_silencioso(df, regresores, growth_type, eventos, def_params)
+        print("No se encontraron óptimos. Usando por defecto.")
+        def_params = {'changepoint_prior_scale':0.01, 'seasonality_prior_scale':10., 'holidays_prior_scale':10., 'seasonality_mode':'additive', 'changepoint_range':0.8}
+        m, met = entrenar_prophet_silencioso(df, regresores, growth_type, eventos, def_params)
         return def_params, m, met['RMSE']
 
 def entrenar_modelo_prophet_continuo(df, modelo_anterior=None, regresores=None, growth_type='logistic',
@@ -1373,72 +1319,60 @@ def entrenar_modelo_prophet_continuo(df, modelo_anterior=None, regresores=None, 
     if regresores:
         for r_name in regresores:
             if r_name in df.columns:
-                print(f"  Extrapolando regresor '{r_name}'...")
-
-                # 1. Descomposición de la serie del regresor
-                regressor_series = df[['ds', r_name]].set_index('ds')[r_name]
-
-                # Asegurarse de que hay suficientes datos para la descomposición
-                seasonal_period = obtener_estacionalidad(frecuencia)
-                if len(regressor_series) >= seasonal_period * 2:
-                    try:
-                        # Usamos seasonal_decompose de statsmodels
-                        decomposition = seasonal_decompose(regressor_series, model='additive', period=seasonal_period)
-                        trend = decomposition.trend.dropna()
-                        seasonal = decomposition.seasonal
-                    except ValueError as e:
-                        print(f"    Advertencia: No se pudo descomponer '{r_name}', usando tendencia lineal simple. Error: {e}")
-                        trend = regressor_series # Fallback a usar la serie completa como tendencia
-                        seasonal = pd.Series(np.zeros(len(regressor_series)), index=regressor_series.index) # Sin estacionalidad
-                else:
-                    print(f"    Advertencia: Datos insuficientes para descomposición estacional de '{r_name}'. Usando tendencia lineal simple.")
-                    trend = regressor_series
-                    seasonal = pd.Series(np.zeros(len(regressor_series)), index=regressor_series.index)
-
-                # 2. Extrapolar la tendencia
-                # Usar los últimos puntos de la tendencia para el modelo lineal
-                puntos_tendencia_fit = min(seasonal_period, len(trend))
-                if puntos_tendencia_fit < 2:
-                    print(f"    Advertencia: No hay suficientes puntos de tendencia para '{r_name}'. Usando la media.")
-                    future_trend = np.full(periodos_futuros, trend.mean() if not trend.empty else 0)
-                else:
-                    X_trend = np.arange(len(trend)).reshape(-1, 1)[-puntos_tendencia_fit:]
-                    y_trend = trend.values[-puntos_tendencia_fit:]
-
-                    trend_model = LinearRegression()
-                    trend_model.fit(X_trend, y_trend)
-
-                    # Forzar pendiente no negativa
-                    if trend_model.coef_[0] < 0:
-                        print(f"    Pendiente de tendencia para '{r_name}' era negativa ({trend_model.coef_[0]:.4f}), forzando a cero.")
-                        trend_model.coef_[0] = 0
-
-                    future_steps_trend = np.arange(len(trend), len(trend) + periodos_futuros).reshape(-1, 1)
-                    future_trend = trend_model.predict(future_steps_trend)
-
-                # 3. Proyectar la estacionalidad
-                # Repetir el último ciclo estacional
-                last_seasonal_cycle = seasonal.values[-seasonal_period:]
-                future_seasonal = np.tile(last_seasonal_cycle, periodos_futuros // seasonal_period + 1)[:periodos_futuros]
-
-                # 4. Combinar tendencia y estacionalidad para la predicción del regresor
-                future_regressor_values = future_trend + future_seasonal
-
-                # Asignar los valores históricos y los proyectados al dataframe 'future'
-                future.loc[:len(df)-1, r_name] = df[r_name].values
-
-                # Verificar la longitud antes de asignar
-                future_slice_len = len(future.loc[len(df):, r_name])
-                if future_slice_len == len(future_regressor_values):
-                    future.loc[len(df):, r_name] = future_regressor_values
-                else:
-                    print(f"    Advertencia: Desajuste de longitud en la extrapolación del regresor '{r_name}'. Rellenando.")
-                    # Asignar lo que se pueda y rellenar el resto
-                    min_len = min(future_slice_len, len(future_regressor_values))
-                    future.loc[len(df):len(df)+min_len-1, r_name] = future_regressor_values[:min_len]
-                    future[r_name] = future[r_name].ffill().bfill() # Rellenar por si acaso
-
+                p_avg = 12 if frecuencia == 'mensual' else 30 if frecuencia == 'diario' else 24*7 if frecuencia in ['horario', 'sub-horario'] else max(1, len(df) // 10)
+                last_val = df[r_name].rolling(window=p_avg).mean().iloc[-1] if len(df) >= p_avg else df[r_name].mean()
+                future[r_name] = future['ds'].map(lambda x: last_val if x > df['ds'].max() else (df.loc[df['ds'] == x, r_name].iloc[0] if x in df['ds'].values else np.nan))
+                future[r_name] = future[r_name].interpolate(method='linear').fillna(last_val)
     forecast = model.predict(future)
+
+    # --- INICIO: Corrección de tendencia lineal negativa ---
+    if growth_type == 'linear':
+        print("Verificando la proyección de tendencia para crecimiento lineal...")
+        num_hist = len(df)
+        forecast_hist = forecast.iloc[:num_hist]
+
+        # Asegurarse de que hay suficientes datos para el cálculo de la pendiente
+        if num_hist >= 12:
+            trend_hist_ultimos_12 = forecast_hist['trend'].iloc[-12:]
+
+            # Usando regresión lineal simple para obtener la pendiente
+            x_trend = np.arange(len(trend_hist_ultimos_12))
+            y_trend = trend_hist_ultimos_12.values
+
+            # Evitar error si todos los valores son iguales
+            if len(np.unique(y_trend)) > 1:
+                slope = np.polyfit(x_trend, y_trend, 1)[0]
+            else:
+                slope = 0
+
+            print(f"  Pendiente de la tendencia de los últimos 12 meses: {slope:.4f}")
+
+            # Si la pendiente es negativa, aplanar la tendencia futura
+            if slope < -1e-4: # Usar un pequeño umbral para evitar ajustes por fluctuaciones mínimas
+                print("  Pendiente negativa detectada. Aplanando la tendencia futura.")
+
+                # Guardar la tendencia original para calcular la diferencia
+                old_trend_future = forecast.loc[num_hist:, 'trend'].copy()
+
+                # Aplanar la tendencia: el valor futuro es el último valor histórico
+                last_historical_trend_value = forecast_hist['trend'].iloc[-1]
+                forecast.loc[num_hist:, 'trend'] = last_historical_trend_value
+
+                # El nuevo 'yhat' es la nueva tendencia más la suma de los otros componentes
+                # (que no cambian). La diferencia en yhat es simplemente la diferencia en la tendencia.
+                trend_diff = forecast.loc[num_hist:, 'trend'] - old_trend_future
+
+                # Ajustar yhat y los intervalos de confianza
+                for col in ['yhat', 'yhat_lower', 'yhat_upper']:
+                    if col in forecast.columns:
+                        forecast.loc[num_hist:, col] = forecast.loc[num_hist:, col] + trend_diff
+
+                print("  Tendencia futura y pronóstico ajustados.")
+        else:
+            print("  No hay suficientes datos históricos (se requieren >= 12) para ajustar la tendencia lineal.")
+
+    # --- FIN: Corrección de tendencia lineal negativa ---
+
     if ajuste_adicional:
         print("Aplicando ajustes adicionales...")
         p_adj = 12 if frecuencia == 'mensual' else 30 if frecuencia == 'diario' else 24*7 if frecuencia in ['horario', 'sub-horario'] else max(1, len(df) // 10)
@@ -1980,323 +1914,231 @@ def entrenar_modelos_avanzados_continuo(df, modelo_gru_anterior=None, modelo_wav
         time_steps_calculado = max(1, min(ts_adj, max_allowable_ts))
     print(f"Time steps calculado internamente para {frecuencia}: {time_steps_calculado}")
 
-    if not os.path.exists('modelos_avanzados'):
-        os.makedirs('modelos_avanzados')
+    if not os.path.exists('modelos_avanzados'): os.makedirs('modelos_avanzados')
 
     # --- Preparación de Datos para RNNs (GRU/WaveNet) ---
-    # Esta sección prepara los datos para los modelos de redes neuronales,
-    # incluyendo la adición de características de puntos de cambio (changepoints) si están disponibles.
+    print("DEBUG: Preparando datos para RNN...")
     features_list_rnn = [df[columna].values.copy().astype(float)]
     feature_names_rnn = [columna]
     n_features_input_rnn = 1
+    df_for_rnn_features = df.copy()
+    if 'Date' not in df_for_rnn_features.columns and 'ds' in df_for_rnn_features.columns:
+        df_for_rnn_features['Date'] = df_for_rnn_features['ds']
     if changepoint_features is not None and not changepoint_features.empty:
         print("  Incorporando CPs a modelos RNN.")
-        df_for_rnn_features = df.copy()
-        if 'Date' not in df_for_rnn_features.columns and 'ds' in df_for_rnn_features.columns:
-            df_for_rnn_features['Date'] = df_for_rnn_features['ds']
         df_for_rnn_features['Date_dt_merge_key'] = pd.to_datetime(df_for_rnn_features['Date'])
-        cp_features_dt_rnn = changepoint_features.copy()
-        cp_features_dt_rnn['ds'] = pd.to_datetime(cp_features_dt_rnn['ds'])
+        cp_features_dt_rnn = changepoint_features.copy(); cp_features_dt_rnn['ds'] = pd.to_datetime(cp_features_dt_rnn['ds'])
         df_merged_cp_rnn = pd.merge(df_for_rnn_features, cp_features_dt_rnn, left_on='Date_dt_merge_key', right_on='ds', how='left', suffixes=('', '_cp')).ffill().bfill()
         for cp_col_rnn in changepoint_features.columns:
             if cp_col_rnn != 'ds':
                 col_to_check_in_merged = cp_col_rnn
-                if col_to_check_in_merged not in df_merged_cp_rnn.columns and f"{cp_col_rnn}_cp" in df_merged_cp_rnn.columns:
-                    col_to_check_in_merged = f"{cp_col_rnn}_cp"
+                if col_to_check_in_merged not in df_merged_cp_rnn.columns and f"{cp_col_rnn}_cp" in df_merged_cp_rnn.columns: col_to_check_in_merged = f"{cp_col_rnn}_cp"
                 if col_to_check_in_merged in df_merged_cp_rnn.columns:
-                    features_list_rnn.append(df_merged_cp_rnn[col_to_check_in_merged].values.astype(float))
-                    feature_names_rnn.append(cp_col_rnn)
-                    n_features_input_rnn += 1
-        print(f"  Features totales para RNN: {n_features_input_rnn}, Nombres: {feature_names_rnn}")
-
-    all_features_array_rnn = np.stack(features_list_rnn, axis=-1)
-    scaler_rnn = MinMaxScaler(feature_range=(0, 1))
-    data_scaled_rnn_full_input = scaler_rnn.fit_transform(all_features_array_rnn)
+                    features_list_rnn.append(df_merged_cp_rnn[col_to_check_in_merged].values.astype(float)); feature_names_rnn.append(cp_col_rnn); n_features_input_rnn += 1
+        print(f"  Features totales RNN: {n_features_input_rnn}, Nombres: {feature_names_rnn}")
+    all_features_array_rnn = np.stack(features_list_rnn, axis=-1); scaler_rnn = MinMaxScaler(feature_range=(0, 1)); data_scaled_rnn_full_input = scaler_rnn.fit_transform(all_features_array_rnn)
     X_rnn_seq, y_rnn_seq_scaled_raw_all_features = crear_dataset_secuencial(data_scaled_rnn_full_input, time_steps_calculado)
-    if X_rnn_seq.shape[0] == 0:
-        print("No se pudieron crear secuencias para los modelos RNN. Saltando entrenamiento.")
-        return {}
+    if X_rnn_seq.shape[0] == 0: print("No hay secuencias RNN."); return {}
     y_rnn_seq_scaled_target = y_rnn_seq_scaled_raw_all_features[:, 0].reshape(-1, 1)
+    print(f"DEBUG: X_rnn_seq.shape: {X_rnn_seq.shape}, y_rnn_seq_scaled_target.shape: {y_rnn_seq_scaled_target.shape}")
 
     # --- Preparación de Datos para GBR ---
-    # Similar a la preparación de RNN, pero con la opción de usar datos diferenciados.
-    data_values_original_energia = df[columna].values.copy().astype(float)
-    X_gbr_seq_final, y_gbr_target_scaled_final, scaler_gbr = None, None, None
-    gbr_feature_names_constructed = []
-    gbr_target_is_diff = False
-    base_energy_for_gbr_lags = np.diff(data_values_original_energia) if usar_diferenciacion_gbr and len(data_values_original_energia) >= 2 else data_values_original_energia
-    scaler_gbr = MinMaxScaler(feature_range=(0, 1))
-    scaled_energy_for_gbr_lags = scaler_gbr.fit_transform(base_energy_for_gbr_lags.reshape(-1, 1))
-    gbr_target_is_diff = usar_diferenciacion_gbr and len(data_values_original_energia) >= 2
-
-    if len(scaled_energy_for_gbr_lags) > time_steps_calculado:
+    print("DEBUG: Preparando datos para GBR...")
+    data_values_original_energia = df[columna].values.copy().astype(float); X_gbr_seq_final, y_gbr_target_scaled_final, scaler_gbr = None, None, None; gbr_feature_names_constructed = []; gbr_target_is_diff = False
+    base_energy_for_gbr_lags = None
+    if usar_diferenciacion_gbr:
+        if len(data_values_original_energia) >= 2:
+            base_energy_for_gbr_lags = np.diff(data_values_original_energia); scaler_gbr = MinMaxScaler(feature_range=(0, 1)); scaled_energy_for_gbr_lags = scaler_gbr.fit_transform(base_energy_for_gbr_lags.reshape(-1, 1)); gbr_target_is_diff = True
+    else:
+        base_energy_for_gbr_lags = data_values_original_energia; scaler_gbr = MinMaxScaler(feature_range=(0, 1)); scaled_energy_for_gbr_lags = scaler_gbr.fit_transform(base_energy_for_gbr_lags.reshape(-1, 1)); gbr_target_is_diff = False
+    if base_energy_for_gbr_lags is not None and len(scaled_energy_for_gbr_lags) > time_steps_calculado:
         X_gbr_energy_lags_3d, y_gbr_target_scaled_final = crear_dataset_secuencial(scaled_energy_for_gbr_lags, time_steps_calculado)
         if X_gbr_energy_lags_3d.shape[0] > 0:
-            num_gbr_samples = X_gbr_energy_lags_3d.shape[0]
-            X_gbr_features_list_final = [X_gbr_energy_lags_3d.reshape(num_gbr_samples, -1)]
-            for i in range(time_steps_calculado):
-                gbr_feature_names_constructed.append(f"{columna}{'_diff' if gbr_target_is_diff else ''}_lag{i+1}")
-
+            num_gbr_samples = X_gbr_energy_lags_3d.shape[0]; X_gbr_features_list_final = [X_gbr_energy_lags_3d.reshape(num_gbr_samples, -1)]
+            for i_lag_gbr_e in range(time_steps_calculado): gbr_feature_names_constructed.append(f"{columna}{'_diff' if gbr_target_is_diff else ''}_lag{i_lag_gbr_e+1}")
             if changepoint_features is not None and not changepoint_features.empty:
-                df_for_gbr_cp_features = df.copy()
-                if 'Date' not in df_for_gbr_cp_features.columns and 'ds' in df_for_gbr_cp_features.columns:
-                    df_for_gbr_cp_features['Date'] = df_for_gbr_cp_features['ds']
-                df_for_gbr_cp_features['Date_dt_merge_key'] = pd.to_datetime(df_for_gbr_cp_features['Date'])
-                cp_features_dt_gbr = changepoint_features.copy()
-                cp_features_dt_gbr['ds'] = pd.to_datetime(cp_features_dt_gbr['ds'])
+                df_for_gbr_cp_features = df.copy();
+                if 'Date' not in df_for_gbr_cp_features.columns and 'ds' in df_for_gbr_cp_features.columns: df_for_gbr_cp_features['Date'] = df_for_gbr_cp_features['ds']
+                df_for_gbr_cp_features['Date_dt_merge_key'] = pd.to_datetime(df_for_gbr_cp_features['Date']); cp_features_dt_gbr = changepoint_features.copy(); cp_features_dt_gbr['ds'] = pd.to_datetime(cp_features_dt_gbr['ds'])
                 df_merged_cp_gbr = pd.merge(df_for_gbr_cp_features, cp_features_dt_gbr, left_on='Date_dt_merge_key', right_on='ds', how='left', suffixes=('', '_cp')).ffill().bfill()
-                for cp_col in changepoint_features.columns:
-                    if cp_col != 'ds':
-                        col_to_check = cp_col if cp_col in df_merged_cp_gbr.columns else f"{cp_col}_cp"
-                        if col_to_check in df_merged_cp_gbr.columns:
-                            cp_data_series = df_merged_cp_gbr[col_to_check].values.astype(float)
-                            if len(cp_data_series) > time_steps_calculado:
-                                X_cp_lags, _ = crear_dataset_secuencial(cp_data_series.reshape(-1, 1), time_steps_calculado)
-                                if X_cp_lags.shape[0] >= num_gbr_samples:
-                                    X_gbr_features_list_final.append(X_cp_lags[-num_gbr_samples:].reshape(num_gbr_samples, -1))
-                                    for i in range(time_steps_calculado):
-                                        gbr_feature_names_constructed.append(f"{cp_col}_lag{i+1}")
-
-            if X_gbr_features_list_final:
-                X_gbr_seq_final = np.concatenate(X_gbr_features_list_final, axis=1)
-                print(f"  Forma final de datos GBR (target_diff={gbr_target_is_diff}): X={X_gbr_seq_final.shape}, y={y_gbr_target_scaled_final.shape}")
-        else:
-            X_gbr_seq_final = None
+                for cp_col_gbr_lags in changepoint_features.columns:
+                    col_to_check_gbr_cp = cp_col_gbr_lags
+                    if col_to_check_gbr_cp not in df_merged_cp_gbr.columns and f"{cp_col_gbr_lags}_cp" in df_merged_cp_gbr.columns: col_to_check_gbr_cp = f"{cp_col_gbr_lags}_cp"
+                    if cp_col_gbr_lags != 'ds' and col_to_check_gbr_cp in df_merged_cp_gbr.columns:
+                        cp_data_for_gbr_lags_series = df_merged_cp_gbr[col_to_check_gbr_cp].values.astype(float)
+                        if len(cp_data_for_gbr_lags_series) > time_steps_calculado:
+                            X_cp_lags_3d_gbr_current, _ = crear_dataset_secuencial(cp_data_for_gbr_lags_series.reshape(-1,1), time_steps_calculado)
+                            if X_cp_lags_3d_gbr_current.shape[0] >= num_gbr_samples:
+                                X_gbr_features_list_final.append(X_cp_lags_3d_gbr_current[-num_gbr_samples:].reshape(num_gbr_samples, -1))
+                                for i_lag_gbr_cp in range(time_steps_calculado): gbr_feature_names_constructed.append(f"{cp_col_gbr_lags}_lag{i_lag_gbr_cp+1}")
+            if X_gbr_features_list_final : X_gbr_seq_final = np.concatenate(X_gbr_features_list_final, axis=1)
+            else: X_gbr_seq_final = None
+            if X_gbr_seq_final is not None: print(f"  Forma final X_gbr_seq (target_diff={gbr_target_is_diff}): {X_gbr_seq_final.shape}, y_target: {y_gbr_target_scaled_final.shape}")
+        else: X_gbr_seq_final = None
 
     # --- División Train/Val ---
     X_train_rnn, X_val_rnn, y_train_rnn, y_val_rnn = [None]*4
     if X_rnn_seq is not None and X_rnn_seq.shape[0] > 0:
-        split_idx_rnn = int(X_rnn_seq.shape[0] * (1 - val_split))
-        if split_idx_rnn > 0 and X_rnn_seq.shape[0] - split_idx_rnn > 0:
-            X_train_rnn, X_val_rnn = X_rnn_seq[:split_idx_rnn], X_rnn_seq[split_idx_rnn:]
-            y_train_rnn, y_val_rnn = y_rnn_seq_scaled_target[:split_idx_rnn], y_rnn_seq_scaled_target[split_idx_rnn:]
-        else:
-            print("  La división Train/Val para RNN resultó en un conjunto vacío. No se entrenarán modelos RNN.")
-            X_rnn_seq = None
-
+        split_idx_rnn = int(X_rnn_seq.shape[0] * (1-val_split))
+        if split_idx_rnn > 0 and X_rnn_seq.shape[0] - split_idx_rnn > 0 :
+            X_train_rnn, X_val_rnn = X_rnn_seq[:split_idx_rnn], X_rnn_seq[split_idx_rnn:]; y_train_rnn, y_val_rnn = y_rnn_seq_scaled_target[:split_idx_rnn], y_rnn_seq_scaled_target[split_idx_rnn:]
+            print(f"DEBUG: RNN Train shapes: X={X_train_rnn.shape}, y={y_train_rnn.shape}; Val shapes: X={X_val_rnn.shape}, y={y_val_rnn.shape}")
+        else: X_rnn_seq = None; print("  División Train/Val para RNN resultó en conjunto(s) vacío(s).")
     X_train_gbr, X_val_gbr, y_train_gbr_flat, y_val_gbr_target_scaled_flat = [None]*4
-    if X_gbr_seq_final is not None and y_gbr_target_scaled_final is not None and X_gbr_seq_final.shape[0] == y_gbr_target_scaled_final.shape[0] and X_gbr_seq_final.shape[0] > 0:
-        split_idx_gbr = int(X_gbr_seq_final.shape[0] * (1 - val_split))
-        if split_idx_gbr > 0 and X_gbr_seq_final.shape[0] - split_idx_gbr > 0:
-            X_train_gbr, X_val_gbr = X_gbr_seq_final[:split_idx_gbr], X_gbr_seq_final[split_idx_gbr:]
-            y_train_gbr_flat = y_gbr_target_scaled_final[:split_idx_gbr].ravel()
-            y_val_gbr_target_scaled_flat = y_gbr_target_scaled_final[split_idx_gbr:].ravel()
-        else:
-            print("  La división Train/Val para GBR resultó en un conjunto vacío. No se entrenará GBR.")
-            X_gbr_seq_final = None
-    else:
-        print("  Error de alineación o datos vacíos para GBR. No se entrenará GBR.")
-        X_gbr_seq_final = None
+    if X_gbr_seq_final is not None and y_gbr_target_scaled_final is not None:
+        if X_gbr_seq_final.shape[0] == y_gbr_target_scaled_final.shape[0] and X_gbr_seq_final.shape[0] > 0:
+            split_idx_gbr = int(X_gbr_seq_final.shape[0] * (1-val_split))
+            if split_idx_gbr > 0 and X_gbr_seq_final.shape[0] - split_idx_gbr > 0 :
+                X_train_gbr, X_val_gbr = X_gbr_seq_final[:split_idx_gbr], X_gbr_seq_final[split_idx_gbr:]; y_train_gbr_flat = y_gbr_target_scaled_final[:split_idx_gbr].ravel(); y_val_gbr_target_scaled_flat = y_gbr_target_scaled_final[split_idx_gbr:].ravel()
+                print(f"DEBUG: GBR Train shapes: X={X_train_gbr.shape}, y={y_train_gbr_flat.shape}; Val shapes: X={X_val_gbr.shape}, y={y_val_gbr_target_scaled_flat.shape}")
+            else: X_gbr_seq_final = None; print("  División Train/Val para GBR resultó en conjunto(s) vacío(s).")
+        else: X_gbr_seq_final = None; print(f"Error: Desalineación GBR X/y o datos vacíos.")
 
     keras_callbacks_base = [EarlyStopping(monitor='val_loss', patience=early_stopping_patience, restore_best_weights=True)]
-    if use_reduce_lr_plateau:
-        keras_callbacks_base.append(ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=max(1, int(early_stopping_patience/2)-2), min_lr=1e-7, verbose=0))
+    if use_reduce_lr_plateau: keras_callbacks_base.append(ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=max(1,int(early_stopping_patience/2)-2), min_lr=1e-7, verbose=0))
 
-    modelos_entrenados = {}
-    modelos_a_entrenar = []
-    if X_train_rnn is not None and X_train_rnn.shape[0] > 0:
-        modelos_a_entrenar.extend(['gru_avanzado', 'wavenet'])
-    if X_train_gbr is not None and X_train_gbr.shape[0] > 0:
-        modelos_a_entrenar.append('gradient_boosting')
+    modelos_entrenados = {}; modelos_a_entrenar = []
+    if X_train_rnn is not None and X_train_rnn.shape[0] > 0: modelos_a_entrenar.extend(['gru_avanzado', 'wavenet'])
+    else: print("DEBUG: No se entrenarán RNNs (GRU, WaveNet) por datos de entrenamiento insuficientes.")
+    if X_train_gbr is not None and X_train_gbr.shape[0] > 0 : modelos_a_entrenar.append('gradient_boosting')
+    else: print("DEBUG: No se entrenará GBR por datos de entrenamiento insuficientes.")
 
-    if not modelos_a_entrenar:
-        return {}, 0
+    print(f"DEBUG: Modelos a entrenar: {modelos_a_entrenar}")
+    if not modelos_a_entrenar: return {}
 
     models_progress = get_progress_bar(total=len(modelos_a_entrenar), desc="Entrenando modelos avanzados", position=0, leave=True)
 
     for tipo_modelo in modelos_a_entrenar:
-        models_progress.set_description(f"Entrenando {tipo_modelo}")
-        model = None
+        models_progress.set_description(f"Entrenando {tipo_modelo}"); model = None
 
         base_path_keras = f'modelos_avanzados/modelo_{tipo_modelo}_{id_datos}' if id_datos else f'modelos_avanzados/modelo_{tipo_modelo}'
-        model_path_full_keras = base_path_keras + '.keras'
-        model_path_weights_keras = base_path_keras + '.weights.h5'
-        model_path_gbr = base_path_keras + '.pkl'
+        model_path_full_keras = base_path_keras + '.keras' # Para guardar/cargar modelo completo Keras
+        model_path_weights_keras = base_path_keras + '.weights.h5' # Para guardar/cargar solo pesos Keras
+        model_path_gbr = base_path_keras + '.pkl' # Para GBR
+
+        model_path_to_use_mc = model_path_full_keras # Por defecto para ModelCheckpoint
+        if tipo_modelo == 'gradient_boosting': model_path_to_use_mc = model_path_gbr # No se usará para GBR pero por consistencia
 
         current_callbacks_for_fit = []
         if tipo_modelo in ['gru_avanzado', 'wavenet']:
             current_callbacks_for_fit = list(keras_callbacks_base)
             current_callbacks_for_fit.append(ModelCheckpoint(model_path_full_keras, save_best_only=True, monitor='val_loss', mode='min', verbose=0))
             if not disable_tqdm_callback_keras:
-                current_callbacks_for_fit.append(TqdmCallback(epocas, desc=f"Épocas {tipo_modelo}", position=1))
+                 current_callbacks_for_fit.append(TqdmCallback(epocas, desc=f"Épocas {tipo_modelo}", position=1))
 
         input_shape_actual_rnn = (time_steps_calculado, n_features_input_rnn)
-        current_scaler_plot_info = None
-        y_val_plot_real_desnorm_target = None
-        y_val_plot_pred_desnorm = None
-        val_loss = np.nan
-        # Nuevo: Diccionario para guardar las predicciones de validación de cada modelo
-        validation_predictions = {}
+        current_scaler_plot_info = None; y_val_plot_real_desnorm_target = None; y_val_plot_pred_desnorm = None; val_loss = np.nan
 
         if tipo_modelo == 'gru_avanzado':
             print(f"\n--- Iniciando procesamiento para GRU ---")
-            print(f"GRU: Creando nueva instancia. Input shape: {input_shape_actual_rnn}")
-            model = crear_modelo_gru_avanzado(input_shape_actual_rnn, n_features_input_rnn, **config_gru)
-            if modelo_gru_anterior and os.path.exists(model_path_weights_keras):
+            modelo_ant_keras_obj = modelo_gru_anterior; config_actual = config_gru
+            print(f"GRU: Creando nueva instancia de la arquitectura. Input shape: {input_shape_actual_rnn}")
+            model = crear_modelo_gru_avanzado(input_shape_actual_rnn, n_features_input_rnn, **config_actual)
+            if modelo_ant_keras_obj and os.path.exists(model_path_weights_keras):
                 try:
                     print(f"GRU: Intentando cargar pesos desde {model_path_weights_keras}.")
-                    model.load_weights(model_path_weights_keras)
-                    print("GRU: Pesos cargados.")
-                except Exception as e:
-                    print(f"GRU: Error cargando pesos: {e}. Entrenando desde cero.")
-            else:
-                print("GRU: No hay modelo anterior o archivo de pesos. Entrenando desde cero.")
-            if model is not None:
-                current_scaler_plot_info = {'scaler': scaler_rnn, 'n_features': n_features_input_rnn, 'target_idx': 0}
-            else:
-                print("ERROR: Modelo GRU no se pudo crear.")
+                    model.load_weights(model_path_weights_keras); print("GRU: Pesos cargados.")
+                except Exception as e_load_weights: print(f"GRU: Error cargando pesos: {e_load_weights}. Entrenando desde cero.")
+            else: print("GRU: No hay modelo anterior o archivo de pesos. Entrenando desde cero.")
+            print(f"GRU: 'model' es None: {model is None}")
+            if model is not None: current_scaler_plot_info = {'scaler': scaler_rnn, 'n_features': n_features_input_rnn, 'target_idx': 0}
+            else: print("ERROR: Modelo GRU no se pudo crear.")
 
         elif tipo_modelo == 'wavenet':
             print(f"\n--- Iniciando procesamiento para WaveNet ---")
+            modelo_ant_keras_obj = modelo_wavenet_anterior; config_actual = config_wavenet
+            # Path específico para pesos de wavenet
             base_path_wavenet = f'modelos_avanzados/modelo_wavenet_{id_datos}' if id_datos else 'modelos_avanzados/modelo_wavenet'
             wavenet_weights_path = base_path_wavenet + '.weights.h5'
-            print(f"WaveNet: Creando nueva instancia. Input shape: {input_shape_actual_rnn}")
-            model = crear_modelo_wavenet(input_shape_actual_rnn, n_features_input_rnn, **config_wavenet)
-            if modelo_wavenet_anterior and os.path.exists(wavenet_weights_path):
+
+            print(f"WaveNet: Creando nueva instancia de la arquitectura. Input shape: {input_shape_actual_rnn}")
+            model = crear_modelo_wavenet(input_shape_actual_rnn, n_features_input_rnn, **config_actual)
+            if modelo_ant_keras_obj and os.path.exists(wavenet_weights_path):
                 try:
                     print(f"WaveNet: Intentando cargar pesos desde {wavenet_weights_path}.")
-                    model.load_weights(wavenet_weights_path)
-                    print("WaveNet: Pesos cargados.")
-                except Exception as e:
-                    print(f"WaveNet: Error cargando pesos: {e}. Entrenando desde cero.")
-            else:
-                print(f"WaveNet: No hay modelo anterior o archivo de pesos. Entrenando desde cero.")
-            if model is not None:
-                current_scaler_plot_info = {'scaler': scaler_rnn, 'n_features': n_features_input_rnn, 'target_idx': 0}
-            else:
-                print("ERROR: Modelo WaveNet no se pudo crear.")
+                    model.load_weights(wavenet_weights_path); print("WaveNet: Pesos cargados.")
+                except Exception as e_load_weights: print(f"WaveNet: Error cargando pesos: {e_load_weights}. Entrenando desde cero.")
+            else: print(f"WaveNet: No hay modelo anterior o archivo de pesos {wavenet_weights_path}. Entrenando desde cero.")
+            print(f"WaveNet: 'model' es None: {model is None}")
+            if model is not None: current_scaler_plot_info = {'scaler': scaler_rnn, 'n_features': n_features_input_rnn, 'target_idx': 0}
+            else: print("ERROR: Modelo WaveNet no se pudo crear.")
 
         if tipo_modelo in ['gru_avanzado', 'wavenet']:
             if model is None or X_train_rnn is None:
-                print(f"Saltando entrenamiento para {tipo_modelo} por falta de modelo o datos.")
-                models_progress.update(1)
-                continue
-            print(f"Entrenando {tipo_modelo}...")
+                print(f"DEBUG: Saltando FIT para {tipo_modelo} porque 'model' ({model is None}) o 'X_train_rnn' ({X_train_rnn is None}) es None.")
+                models_progress.update(1); continue
+            print(f"Entrenando {tipo_modelo} con X_train_rnn: {X_train_rnn.shape}, y_train_rnn: {y_train_rnn.shape}")
             hist = model.fit(X_train_rnn, y_train_rnn, epochs=epocas, batch_size=batch_size, validation_data=(X_val_rnn, y_val_rnn), callbacks=current_callbacks_for_fit, verbose=0)
-            try:
-                model.save_weights(model_path_weights_keras)
-                print(f"Pesos finales de {tipo_modelo} guardados en {model_path_weights_keras}")
-            except Exception as e:
-                print(f"Error guardando pesos finales de {tipo_modelo}: {e}")
+
+            # Guardar pesos después del fit (puede ser redundante si ModelCheckpoint ya lo hizo bien, pero asegura que se guarden)
+            try: model.save_weights(model_path_weights_keras); print(f"Pesos finales de {tipo_modelo} guardados en {model_path_weights_keras}")
+            except Exception as e_sw: print(f"Error guardando pesos finales {tipo_modelo}: {e_sw}")
 
             if os.path.exists(model_path_full_keras):
-                try:
-                    model = load_model(model_path_full_keras)
-                    print(f"Mejor modelo {tipo_modelo} cargado desde {model_path_full_keras}")
-                except Exception as e:
-                    print(f"Error cargando {tipo_modelo} desde {model_path_full_keras}: {e}. Usando modelo en memoria.")
-            else:
-                print(f"Advertencia: Modelo completo {model_path_full_keras} no encontrado. Usando modelo en memoria.")
+                try: model = load_model(model_path_full_keras); print(f"Mejor modelo {tipo_modelo} cargado desde {model_path_full_keras}")
+                except Exception as e: print(f"Error cargando {tipo_modelo} desde {model_path_full_keras}: {e}. Usando modelo en memoria.")
+            else: print(f"Advertencia: Modelo completo {model_path_full_keras} no encontrado. Usando modelo en memoria.")
 
             if current_scaler_plot_info and model:
-                plt.figure(figsize=(12, 6))
-                plt.plot(hist.history['loss'], label='Entrenamiento')
-                plt.plot(hist.history.get('val_loss', []), label='Validación')
-                plt.title(f"Pérdida del modelo {tipo_modelo}")
-                plt.legend()
-                plt.grid(True)
-                plt.show()
-                val_loss_eval_res = model.evaluate(X_val_rnn, y_val_rnn, verbose=0)
-                val_loss = val_loss_eval_res if isinstance(val_loss_eval_res, float) else val_loss_eval_res[0]
+                plt.figure(figsize=(12,6)); plt.plot(hist.history['loss'],label='Entrenamiento'); plt.plot(hist.history.get('val_loss', []),label='Validación'); plt.title(f"Pérdida {tipo_modelo}"); plt.legend(); plt.grid(True); plt.show()
+                val_loss_eval_res = model.evaluate(X_val_rnn, y_val_rnn, verbose=0); val_loss = val_loss_eval_res if isinstance(val_loss_eval_res, float) else val_loss_eval_res[0]
                 preds_val_scaled = model.predict(X_val_rnn, verbose=0)
-                temp_pred_full = np.zeros((preds_val_scaled.shape[0], current_scaler_plot_info['n_features']))
-                temp_pred_full[:, current_scaler_plot_info['target_idx']] = preds_val_scaled.flatten()
-                y_val_plot_pred_desnorm = current_scaler_plot_info['scaler'].inverse_transform(temp_pred_full)[:, current_scaler_plot_info['target_idx']]
-                temp_real_full = np.zeros((y_val_rnn.shape[0], current_scaler_plot_info['n_features']))
-                temp_real_full[:, current_scaler_plot_info['target_idx']] = y_val_rnn.flatten()
-                y_val_plot_real_desnorm_target = current_scaler_plot_info['scaler'].inverse_transform(temp_real_full)[:, current_scaler_plot_info['target_idx']]
+                temp_pred_full = np.zeros((preds_val_scaled.shape[0], current_scaler_plot_info['n_features'])); temp_pred_full[:, current_scaler_plot_info['target_idx']] = preds_val_scaled.flatten(); y_val_plot_pred_desnorm = current_scaler_plot_info['scaler'].inverse_transform(temp_pred_full)[:, current_scaler_plot_info['target_idx']]
+                temp_real_full = np.zeros((y_val_rnn.shape[0], current_scaler_plot_info['n_features'])); temp_real_full[:, current_scaler_plot_info['target_idx']] = y_val_rnn.flatten(); y_val_plot_real_desnorm_target = current_scaler_plot_info['scaler'].inverse_transform(temp_real_full)[:, current_scaler_plot_info['target_idx']]
 
         elif tipo_modelo == 'gradient_boosting':
-            if X_train_gbr is None:
-                models_progress.update(1)
-                continue
-            print(f"Entrenando GBR (target_diff={gbr_target_is_diff})...")
+            if X_train_gbr is None: models_progress.update(1); continue
+            print(f"Entrenando GBR (target_diff={gbr_target_is_diff}) con X_train_gbr: {X_train_gbr.shape}, y_train_gbr: {y_train_gbr_flat.shape}");
             model = GradientBoostingRegressor(**{**config_gbr, 'random_state': 42})
             model.fit(X_train_gbr, y_train_gbr_flat)
             try:
-                with open(model_path_gbr, 'wb') as f:
-                    pickle.dump(model, f)
-                print(f"Modelo GBR guardado en: {model_path_gbr}")
-                with open(model_path_gbr, 'rb') as f:
-                    model = pickle.load(f)
-            except Exception as e:
-                print(f"Error guardando/cargando GBR: {e}")
-            preds_val_scaled = model.predict(X_val_gbr)
-            val_loss = mean_squared_error(y_val_gbr_target_scaled_flat, preds_val_scaled)
+                with open(model_path_gbr,'wb') as f: pickle.dump(model,f); print(f"Modelo GBR guardado en: {model_path_gbr}")
+                with open(model_path_gbr,'rb') as f: model=pickle.load(f)
+            except Exception as e: print(f"Error guardando/cargando GBR: {e}")
+            preds_val_scaled = model.predict(X_val_gbr); val_loss = mean_squared_error(y_val_gbr_target_scaled_flat, preds_val_scaled)
             print(f"Pérdida GBR (MSE sobre target {'diferenciado' if gbr_target_is_diff else 'original'} escalado): {val_loss:.6f}")
-            y_val_plot_pred_desnorm = scaler_gbr.inverse_transform(preds_val_scaled.reshape(-1, 1)).flatten()
-            y_val_plot_real_desnorm_target = scaler_gbr.inverse_transform(y_val_gbr_target_scaled_flat.reshape(-1, 1)).flatten()
+            y_val_plot_pred_desnorm = scaler_gbr.inverse_transform(preds_val_scaled.reshape(-1,1)).flatten(); y_val_plot_real_desnorm_target = scaler_gbr.inverse_transform(y_val_gbr_target_scaled_flat.reshape(-1,1)).flatten()
             current_scaler_plot_info = {'scaler': scaler_gbr, 'n_features': 1, 'target_idx': 0}
-            if hasattr(model, 'feature_importances_') and X_train_gbr is not None and gbr_feature_names_constructed and len(model.feature_importances_) == len(gbr_feature_names_constructed):
-                imp = model.feature_importances_
-                max_plot = min(40, len(gbr_feature_names_constructed))
-                sorted_idx = np.argsort(imp)[::-1][:max_plot]
-                title_imp = f"Importancia de las {len(sorted_idx)} principales características (GBR, target_diff={gbr_target_is_diff})"
-                plt.figure(figsize=(12, max(6, len(sorted_idx)//3)))
-                plt.title(title_imp)
-                plt.bar(range(len(sorted_idx)), imp[sorted_idx], align='center')
-                plt.xticks(range(len(sorted_idx)), np.array(gbr_feature_names_constructed)[sorted_idx], rotation=90)
-                plt.tight_layout()
-                plt.show()
-        else:
-            models_progress.update(1)
-            continue
-
-        full_metrics = {}
-        if y_val_plot_real_desnorm_target is not None and y_val_plot_pred_desnorm is not None:
-            full_metrics = calcular_metricas_modelo(y_val_plot_real_desnorm_target, y_val_plot_pred_desnorm)
-            print(f"Métricas de validación desescaladas para {tipo_modelo}: {full_metrics}")
+            if hasattr(model,'feature_importances_') and X_train_gbr is not None and gbr_feature_names_constructed and len(model.feature_importances_) == len(gbr_feature_names_constructed):
+                imp = model.feature_importances_; max_plot = min(40, len(gbr_feature_names_constructed)); sorted_idx = np.argsort(imp)[::-1][:max_plot]; title_imp =f"Importancia {len(sorted_idx)} Caract. (GBR, target_diff={gbr_target_is_diff})"; plt.figure(figsize=(12,max(6,len(sorted_idx)//3))); plt.title(title_imp); plt.bar(range(len(sorted_idx)),imp[sorted_idx],align='center'); plt.xticks(range(len(sorted_idx)),np.array(gbr_feature_names_constructed)[sorted_idx],rotation=90); plt.tight_layout(); plt.show()
+        else: models_progress.update(1); continue
 
         if model and current_scaler_plot_info:
+            print(f"DEBUG: Guardando '{tipo_modelo}' en modelos_entrenados.")
             modelos_entrenados[tipo_modelo] = {
-                'model': model,
-                'scaler': current_scaler_plot_info['scaler'],
+                'model':model, 'scaler': current_scaler_plot_info['scaler'],
                 'n_features_model_input': model.input_shape[-1] if hasattr(model, 'input_shape') and tipo_modelo != 'gradient_boosting' else (X_gbr_seq_final.shape[1] if X_gbr_seq_final is not None and tipo_modelo == 'gradient_boosting' else 1),
-                'scaler_n_features_original_fit': current_scaler_plot_info['n_features'],
-                'scaler_target_idx': current_scaler_plot_info['target_idx'],
-                'time_steps': time_steps_calculado,
-                'val_loss': val_loss,
-                'metrics': full_metrics,
-                'usar_diferenciacion': gbr_target_is_diff if tipo_modelo == 'gradient_boosting' else False,
+                'scaler_n_features_original_fit': current_scaler_plot_info['n_features'], 'scaler_target_idx': current_scaler_plot_info['target_idx'],
+                'time_steps':time_steps_calculado, 'val_loss':val_loss, 'usar_diferenciacion': gbr_target_is_diff if tipo_modelo == 'gradient_boosting' else False,
                 'feature_names_input': feature_names_rnn if tipo_modelo != 'gradient_boosting' else (gbr_feature_names_constructed if gbr_feature_names_constructed else None)
             }
+        else:
+            print(f"DEBUG: NO guardando '{tipo_modelo}'. model is None: {model is None}, current_scaler_plot_info is None: {current_scaler_plot_info is None}")
 
         if y_val_plot_real_desnorm_target is not None and y_val_plot_pred_desnorm is not None:
-            plot_title_suffix = f"({tipo_modelo})"
-            y_plot_real_final = y_val_plot_real_desnorm_target
-            y_plot_pred_final = y_val_plot_pred_desnorm
+            plot_title_suffix = f"({tipo_modelo})"; y_plot_real_final = y_val_plot_real_desnorm_target; y_plot_pred_final = y_val_plot_pred_desnorm
             if tipo_modelo == 'gradient_boosting' and gbr_target_is_diff:
-                plot_title_suffix = "(GBR, target_diff, reconstruido)"
+                plot_title_suffix = f"(GBR, target_diff, reconstruido)"
+                # Reconstrucción para plot (si es diferenciado)
                 idx_base_para_recon_plot = (X_gbr_seq_final.shape[0] - len(y_val_gbr_target_scaled_flat)) + time_steps_calculado if X_gbr_seq_final is not None else -1
-                if idx_base_para_recon_plot >= 0 and idx_base_para_recon_plot + len(y_plot_real_final) <= len(data_values_original_energia) + 1:
-                    base_vals_plot = data_values_original_energia[idx_base_para_recon_plot - 1 : idx_base_para_recon_plot - 1 + len(y_plot_real_final)]
+                if idx_base_para_recon_plot >= 0 and idx_base_para_recon_plot < len(data_values_original_energia) and \
+                   idx_base_para_recon_plot + len(y_plot_real_final) <= len(data_values_original_energia) + 1 : # +1 para el y(t-1) del ultimo diff
+
+                    base_vals_plot = data_values_original_energia[idx_base_para_recon_plot -1 : idx_base_para_recon_plot -1 + len(y_plot_real_final)]
                     if len(base_vals_plot) == len(y_plot_real_final):
                         y_plot_real_final = base_vals_plot + y_plot_real_final
                         y_plot_pred_final = base_vals_plot + y_plot_pred_final
-                    else:
-                        print("  Advertencia GBR plot: Desajuste en la longitud para la reconstrucción.")
-                else:
-                    print("  Advertencia GBR plot: Índices fuera de rango para la reconstrucción.")
+                    else: print(f"  Advertencia GBR plot: Desajuste longitud reconstrucción.")
+                else: print(f"  Advertencia GBR plot: Índices fuera de rango para reconstrucción.")
 
             len_min_plot = min(len(y_plot_real_final), len(y_plot_pred_final))
             if len_min_plot > 0:
-                plt.figure(figsize=(15, 6))
-                plt.plot(np.arange(len_min_plot), y_plot_real_final[:len_min_plot], label='Reales')
-                plt.plot(np.arange(len_min_plot), y_plot_pred_final[:len_min_plot], label='Predicciones')
-                plt.title(f'Predicciones vs. Reales en Validación {plot_title_suffix}')
-                plt.xlabel('Tiempo')
-                plt.ylabel('Energía')
-                plt.legend()
-                plt.grid(True)
-                plt.show()
-
-        # Guardar las predicciones de validación desnormalizadas para su uso posterior
-        if y_val_plot_pred_desnorm is not None:
-            validation_predictions[tipo_modelo] = y_val_plot_pred_desnorm
+                plt.figure(figsize=(15,6)); plt.plot(np.arange(len_min_plot), y_plot_real_final[:len_min_plot],label='Reales'); plt.plot(np.arange(len_min_plot), y_plot_pred_final[:len_min_plot],label='Predicciones'); plt.title(f'Preds vs Reales Validación {plot_title_suffix}'); plt.xlabel('Tiempo'); plt.ylabel('Energía'); plt.legend(); plt.grid(True); plt.show()
 
         models_progress.update(1)
     models_progress.close()
-    return modelos_entrenados, time_steps_calculado, validation_predictions
+    print(f"DEBUG: Fin de entrenar_avanzados. Retornando modelos_entrenados.keys(): {modelos_entrenados.keys()} y time_steps_calculado: {time_steps_calculado}")
+    return modelos_entrenados, time_steps_calculado
 
 # ==============================================================================
 # 6. ENSEMBLING, PREDICTION & EVALUATION FUNCTIONS
@@ -2427,28 +2269,26 @@ def exportar_predicciones(forecast_combinado, df_original, nombre_archivo=None, 
 
     Args:
         forecast_combinado: DataFrame con las predicciones futuras combinadas y de modelos individuales.
-        df_original: DataFrame original con datos históricos. La columna de energía ya debe estar nombrada 'Energía'.
+                            Debe tener 'ds', 'yhat' (combinado), y opcionalmente 'yhat_prophet', 'yhat_rnn', etc.
+        df_original: DataFrame original con datos históricos ('Date', 'Energía').
         nombre_archivo: Nombre base para los archivos de salida.
         id_datos: ID único del conjunto de datos.
         incluir_potencia: Booleano, si se deben calcular e incluir columnas de potencia.
-        frecuencia: Frecuencia de los datos.
+        frecuencia: Frecuencia de los datos ('mensual', 'diario', 'horario').
 
     Returns:
         str: Ruta al archivo Excel guardado, o CSV si Excel falla, o None si ambos fallan.
     """
-    if not os.path.exists('predicciones'):
-        os.makedirs('predicciones')
+    if not os.path.exists('predicciones'): os.makedirs('predicciones')
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
-    nombre_base = nombre_archivo if nombre_archivo else f"predicciones_{id_datos}_{timestamp}"
-    nombre_base = os.path.splitext(nombre_base)[0]
-    ruta_excel = f'predicciones/{nombre_base}.xlsx'
-    ruta_csv = f'predicciones/{nombre_base}.csv'
+    nombre_base = f"predicciones_{id_datos}_{timestamp}" if id_datos and not nombre_archivo else (nombre_archivo if nombre_archivo else f"predicciones_{timestamp}")
+    nombre_base = os.path.splitext(nombre_base)[0] # ensure no extension in base
+    ruta_excel, ruta_csv = f'predicciones/{nombre_base}.xlsx', f'predicciones/{nombre_base}.csv'
 
     # --- Preparar datos históricos ---
-    # Asume que la columna de energía en df_original ya se llama 'Energía'
     df_hist = pd.DataFrame({'ds': pd.to_datetime(df_original['Date']), 'yhat': df_original['Energía'], 'tipo': 'histórico'})
-    for model_key in ['prophet', 'rnn', 'avanzado', 'gbr']:
-        df_hist[f'yhat_{model_key}'] = df_hist['yhat']
+    # Replicar energía histórica para columnas de modelos individuales
+    for model_key in ['prophet', 'rnn', 'avanzado', 'gbr']: df_hist[f'yhat_{model_key}'] = df_hist['yhat']
     if incluir_potencia:
         df_hist = calcular_potencia(df_hist.copy(), metodo='ajustada', frecuencia=frecuencia) # Usar copia
 
@@ -2673,432 +2513,656 @@ def visualizar_energia_potencia(forecast_combinado, df_original=None, incluir_mo
 # 7. MAIN APPLICATION LOGIC
 # ==============================================================================
 
-def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, params_ejecucion):
+def main_avanzado():
     """
-    Ejecuta el pipeline completo de análisis y pronóstico para una columna de energía específica.
-
-    Args:
-        df_original (pd.DataFrame): El DataFrame completo con todos los datos.
-        columna_energia (str): El nombre de la columna a analizar y predecir.
-        frecuencia (str): La frecuencia detectada de los datos.
-        params_ejecucion (dict): Diccionario con parámetros definidos por el usuario.
-
-    Returns:
-        tuple: Un tuple con el DataFrame de pronóstico y la ruta del archivo exportado.
+    Función principal con Prophet, GRU, WaveNet y Gradient Boosting.
+    Adaptada para soportar datos mensuales, diarios y horarios.
     """
-    print("\n" + "="*70)
-    print(f"INICIANDO ANÁLISIS PARA: {columna_energia.upper()}")
-    print("="*70)
+    print("\n" + "="*70 + "\nSISTEMA DE PRONÓSTICO DE ENERGÍA (PROPHET, GRU, WAVENET, GBR)\n" + "="*70)
+    print("\n1. CARGANDO DATOS\n-----------------")
+    df_original, id_datos, frecuencia = cargar_datos_desde_drive()
+    if df_original is None:
+        print("No se pudieron cargar los datos. Verificar permisos y que el archivo exista.")
+        return None, None
 
-    # El id_datos ahora será específico para cada columna
-    id_datos_col = f"{hash(columna_energia)}_{str(abs(hash(tuple(df_original[columna_energia].values))))[:10]}"
-
-    print(f"\nTRATANDO VALORES ATÍPICOS (OUTLIERS) PARA '{columna_energia}'")
+    print("\nTRATANDO VALORES ATÍPICOS (OUTLIERS)")
     print("------------------------------------")
     df_original_tratada = detectar_y_tratar_outliers(df_original.copy(),
-                                                     columna_energia=columna_energia,
-                                                     metodo='iqr',
-                                                     estrategia_tratamiento='cap')
+                                                     columna='Energía',
+                                                     metodo='iqr', # Puedes cambiar a 'zscore'
+                                                     estrategia_tratamiento='cap') # Puedes cambiar a 'nan'
 
-    periodos_futuros = params_ejecucion['periodos_futuros']
-
-    print(f"\nCargando modelos anteriores para '{columna_energia}'...")
-    modelos_anteriores = cargar_modelos_anteriores(id_datos_col)
-
-    print(f"\n2. VERIFICANDO MODELOS ANTERIORES (PROPHET) PARA '{columna_energia}'")
-    print("-----------------------------------------------------")
-    mejor_modelo_anterior_prophet = cargar_mejor_modelo_anterior(preguntar=params_ejecucion['preguntar_cargar_modelos'], id_datos=id_datos_col)
-
-    print(f"\n3. ANALIZANDO ESTADÍSTICAS PARA '{columna_energia}'")
-    print("------------------------")
-    analisis_estadistico_energia(df_original_tratada, columna_energia=columna_energia, frecuencia=frecuencia)
-
-    print("\n6. DEFINIENDO EVENTOS ESPECIALES")
-    print("------------------------------")
-    eventos_especiales = definir_eventos_especiales(frecuencia)
-
-    print("\n4. ANALIZANDO CORRELACIONES")
-    print("-------------------------")
-    visualizar_matriz_correlacion_no_lineal(df_original_tratada, metodo='spearman')
-
-    print(f"\n5. SELECCIONANDO REGRESORES PARA '{columna_energia}'")
-    print("-------------------------")
-    metodo_corr = 'spearman'
-    _, umbral_m, _ = sugerir_umbral_correlacion(df_original_tratada, target_variable=columna_energia, metodo=metodo_corr)
-    umbral_sugerido = umbral_m
-    if mejor_modelo_anterior_prophet and 'configuracion' in mejor_modelo_anterior_prophet and 'umbral_correlacion' in mejor_modelo_anterior_prophet['configuracion']:
-        umbral_anterior = mejor_modelo_anterior_prophet['configuracion']['umbral_correlacion']
-        print(f"\nUmbral utilizado en el mejor modelo Prophet anterior: {umbral_anterior:.3f}")
-        umbral_sugerido = (umbral_anterior + umbral_m) / 2
-
-    if mejor_modelo_anterior_prophet and 'configuracion' in mejor_modelo_anterior_prophet and 'umbral_correlacion' in mejor_modelo_anterior_prophet['configuracion']:
-        umbral_anterior = mejor_modelo_anterior_prophet['configuracion']['umbral_correlacion']
-        print(f"\nUmbral utilizado en el mejor modelo Prophet anterior: {umbral_anterior:.3f}")
-        umbral_sugerido = (umbral_anterior + umbral_m) / 2
-    umbral_input = input(f"\nIngrese el umbral para selección de regresores para '{columna_energia}' (0.0-1.0) [sugerido: {umbral_sugerido:.3f}]: ")
-    try:
-        umbral_corr = float(umbral_input) if umbral_input.strip() else umbral_sugerido
-    except ValueError:
-        print(f"Valor inválido para umbral. Usando sugerido: {umbral_sugerido:.3f}")
-        umbral_corr = umbral_sugerido
-    regresores = identificar_regresores_no_lineales(df_original_tratada, target_variable=columna_energia, threshold=umbral_corr, metodo=metodo_corr)
-
-    eventos_especiales = params_ejecucion['eventos_especiales']
-    growth_type = params_ejecucion['growth_type']
-
-    print("\n8. PREPARANDO DATOS PARA PROPHET")
-    print("------------------------------")
-    df_prophet = preparar_datos_para_prophet(df_original_tratada, columna_energia, regresores, growth_type, frecuencia)
-
-    print("\n9. DETECTANDO CAMBIOS ESTRUCTURALES")
-    print("---------------------------------")
-    cambios_estructurales = detectar_cambios_estructurales(df_original_tratada, columna_energia=columna_energia, frecuencia=frecuencia)
-    df_prophet_con_cp = df_prophet.copy()
-    changepoint_features_for_rnn_gbr = None
-    if cambios_estructurales:
-        df_prophet_con_cp = incorporar_cambios_estructurales(df_prophet_con_cp, cambios_estructurales)
-        cp_cols_names_adv = [f'cambio_estructural_{i+1}' for i in range(len(cambios_estructurales))]
-        existing_cp_cols_adv = [col for col in cp_cols_names_adv if col in df_prophet_con_cp.columns]
-        if existing_cp_cols_adv:
-            changepoint_features_for_rnn_gbr = df_prophet_con_cp[['ds'] + existing_cp_cols_adv].copy()
-            print(f"Features de changepoint preparadas para modelos avanzados: {existing_cp_cols_adv}")
-        for cp_col_prophet in existing_cp_cols_adv:
-            if cp_col_prophet not in regresores:
-                regresores.append(cp_col_prophet)
-                print(f"  Regresor '{cp_col_prophet}' añadido a Prophet.")
-
-    ajuste_adicional = params_ejecucion['ajuste_adicional_prophet']
-
-    print("\n11. OPTIMIZANDO HIPERPARÁMETROS (PROPHET)")
-    print("---------------------------------------")
-    best_params_prophet = None
-    if mejor_modelo_anterior_prophet and 'parametros' in mejor_modelo_anterior_prophet and mejor_modelo_anterior_prophet['parametros']:
-        param_grid_refinado = refinar_hiperparametros(mejor_modelo_anterior_prophet, df_original_tratada)
-        if param_grid_refinado:
-            print("Optimizando Prophet con grid refinado basado en modelo anterior...")
-            best_params_prophet, _, _ = optimizar_hiperparametros_refinados(df_prophet_con_cp, param_grid_refinado, regresores, growth_type, eventos_especiales)
-    if best_params_prophet is None:
-        print("Realizando optimización completa de hiperparámetros para Prophet...")
-        best_params_prophet, _, _ = optimizar_hiperparametros(df_prophet_con_cp, regresores, growth_type, eventos_especiales)
-
-    print("\n12. ENTRENANDO MODELO PROPHET FINAL")
-    print("---------------------------------")
-    modelo_prophet, forecast_prophet, metricas_prophet = entrenar_modelo_prophet_continuo(
-        df_prophet_con_cp, modelo_anterior=modelos_anteriores.get('prophet_model'),
-        regresores=regresores, growth_type=growth_type, eventos=eventos_especiales,
-        params=best_params_prophet, periodos_futuros=periodos_futuros,
-        ajuste_adicional=ajuste_adicional, frecuencia=frecuencia
-    )
-
-    print("\n13. ENTRENANDO MODELOS AVANZADOS (GRU, WAVENET, GBR)")
-    print("--------------------------------------------------")
-    usar_diferenciacion_gbr_bool = params_ejecucion['usar_diferenciacion_gbr']
-    use_attention_gru_bool = params_ejecucion['usar_atencion_gru']
-    mi_config_gru = {
-        'gru_units': [80, 40], 'dense_units': [20], 'dropout_rate': 0.2,
-        'bidirectional': True, 'use_attention': use_attention_gru_bool, 'attention_heads': 4,
-        'activation_gru': 'tanh', 'activation_dense': 'relu',
-        'optimizer_type': 'adamw', 'learning_rate': 0.001, 'loss_function': 'huber'
-    }
-    mi_config_wavenet = {
-        'initial_conv_filters': 32, 'residual_block_layers': 2, 'filters_per_block': 32,
-        'kernel_size': 3, 'dilation_rates': [1, 2, 4, 8], 'final_conv_filters': 64,
-        'dense_units': [32, 16], 'dropout_rate': 0.2,
-        'activation_conv': 'relu', 'activation_dense': 'relu',
-        'optimizer_type': 'adam', 'learning_rate': 0.001, 'loss_function': 'huber'
-    }
-    gbr_loss_input = params_ejecucion['gbr_loss']
-    mi_config_gbr = {
-        'n_estimators': 500, 'learning_rate': 0.02, 'max_depth': 5,
-        'min_samples_split': 10, 'min_samples_leaf': 5, 'subsample': 0.8, 'max_features': 'sqrt',
-        'loss': gbr_loss_input, 'n_iter_no_change': 30, 'tol': 1e-5
-    }
-
-    modelos_avanzados_entrenados, time_steps_usados, validation_predictions = entrenar_modelos_avanzados_continuo(
-        df=df_original_tratada, modelo_gru_anterior=modelos_anteriores.get('gru_model'),
-        modelo_wavenet_anterior=modelos_anteriores.get('wavenet_model'),
-        modelo_gbr_anterior=modelos_anteriores.get('gbr_model'), columna=columna_energia,
-        epocas=100, val_split=0.15, batch_size=32, id_datos=id_datos_col, frecuencia=frecuencia,
-        usar_diferenciacion_gbr=usar_diferenciacion_gbr_bool,
-        changepoint_features=changepoint_features_for_rnn_gbr,
-        config_gru=mi_config_gru, config_wavenet=mi_config_wavenet, config_gbr=mi_config_gbr,
-        use_reduce_lr_plateau=True, early_stopping_patience=15
-    )
-
-    metricas_todos_modelos = {'prophet': metricas_prophet if metricas_prophet else {}}
-    model_name_map = {'gru_avanzado': 'gru', 'wavenet': 'wavenet', 'gradient_boosting': 'gbr'}
-    for model_key, model_info in modelos_avanzados_entrenados.items():
-        if model_key in model_name_map:
-            model_name = model_name_map[model_key]
-            metricas_todos_modelos[model_name] = model_info.get('metrics', {})
-
-    print("\n" + "="*20 + f" MÉTRICAS DE AJUSTE PARA {columna_energia.upper()} (SOBRE VALIDACIÓN) " + "="*20)
-    metric_table_data = {'Métrica': ['RMSE', 'MAE', 'R2', 'MAPE']}
-    for name in ['prophet', 'gru', 'wavenet', 'gbr']:
-        metrics = metricas_todos_modelos.get(name, {})
-        metric_table_data[name.upper()] = [metrics.get(m, np.nan) for m in ['RMSE', 'MAE', 'R2', 'MAPE']]
-    print(pd.DataFrame(metric_table_data).to_string(index=False, float_format='%.4f'))
-    print("="*70)
-
-    print("\n14. GENERANDO PREDICCIONES FUTURAS (INDIVIDUALES)")
-    print("-------------------------------------------------")
-    ultima_fecha_historica = df_prophet_con_cp['ds'].max()
-    fechas_futuras = pd.date_range(start=ultima_fecha_historica, periods=periodos_futuros + 1, freq=obtener_freq_prophet(frecuencia))[1:]
-    forecast_prophet_futuro = forecast_prophet[forecast_prophet['ds'] > ultima_fecha_historica].copy()
-
-    predicciones_gru = predicciones_wavenet = predicciones_gbr = None
-    datos_hist_energia = df_original_tratada[columna_energia].values
-    if 'gru_avanzado' in modelos_avanzados_entrenados:
-        predicciones_gru = predecir_con_rnn(modelos_avanzados_entrenados['gru_avanzado'], datos_hist_energia, periodos_futuros, frecuencia=frecuencia, changepoint_features_futuras=changepoint_features_for_rnn_gbr)
-        print("Predicciones GRU (futuras) generadas.")
-    if 'wavenet' in modelos_avanzados_entrenados:
-        predicciones_wavenet = predecir_con_rnn(modelos_avanzados_entrenados['wavenet'], datos_hist_energia, periodos_futuros, frecuencia=frecuencia, changepoint_features_futuras=changepoint_features_for_rnn_gbr)
-        print("Predicciones WaveNet (futuras) generadas.")
-    if 'gradient_boosting' in modelos_avanzados_entrenados:
-        predicciones_gbr = predecir_con_gbr(modelos_avanzados_entrenados['gradient_boosting'], datos_hist_energia, periodos_futuros, frecuencia=frecuencia, changepoint_features_futuras=changepoint_features_for_rnn_gbr)
-        print("Predicciones GBR (futuras) generadas.")
-
-    print("\n15. COMPARANDO PREDICCIONES INDIVIDUALES FUTURAS")
-    print("------------------------------------------------")
-    plt.figure(figsize=(15, 8))
-    plt.plot(df_original_tratada['Date'], df_original_tratada[columna_energia], label='Histórico (Tratado)', alpha=0.7, marker='o', markersize=2, color='black')
-    if not forecast_prophet_futuro.empty: plt.plot(forecast_prophet_futuro['ds'], forecast_prophet_futuro['yhat'], label='Prophet', color='blue', linewidth=1.5)
-    if predicciones_gru is not None: plt.plot(fechas_futuras[:len(predicciones_gru)], predicciones_gru, label='GRU', color='red', linestyle='--', linewidth=1.5)
-    if predicciones_wavenet is not None: plt.plot(fechas_futuras[:len(predicciones_wavenet)], predicciones_wavenet, label='WaveNet', color='green', linestyle='-.', linewidth=1.5)
-    if predicciones_gbr is not None: plt.plot(fechas_futuras[:len(predicciones_gbr)], predicciones_gbr, label='GBR', color='orange', linestyle=':', linewidth=1.5)
-    plt.title(f'Comparación de Modelos para {columna_energia} (Proyecciones Futuras)'); plt.xlabel('Fecha'); plt.ylabel(columna_energia); plt.legend(); plt.grid(True); plt.tight_layout(); plt.show()
-
-    print("\n16. CREANDO ENSAMBLE DE MODELOS (INTERACTIVO)")
-    print("--------------------------------------------")
-    pesos_ensamble_final = {}
-    active_models = {k: v for k, v in {'prophet': forecast_prophet_futuro, 'rnn': predicciones_gru, 'avanzado': predicciones_wavenet, 'gbr': predicciones_gbr}.items() if v is not None and not isinstance(v, pd.DataFrame) or (isinstance(v, pd.DataFrame) and not v.empty)}
-    if active_models:
-        default_weight = 1.0 / len(active_models)
-        for model_key in active_models:
-            user_w_input = input(f"Peso para {model_key.upper()} en '{columna_energia}' (sugerido: {default_weight:.2f}): ")
-            pesos_ensamble_final[model_key] = float(user_w_input) if user_w_input.strip() else default_weight
-        total_weight = sum(pesos_ensamble_final.values())
-        if total_weight > 0:
-            pesos_ensamble_final = {k: v / total_weight for k, v in pesos_ensamble_final.items()}
-        else:
-            pesos_ensamble_final = {k: default_weight for k in active_models}
-        print(f"\nPesos finales del ensamble para '{columna_energia}': {pesos_ensamble_final}")
-        forecast_combinado_futuro = crear_ensamble_mixto(forecast_prophet_futuro, predicciones_gru, predicciones_wavenet, predicciones_gbr, fechas_futuras, pesos_ensamble_final)
-    else:
-        print("No hay modelos con predicciones válidas para ensamble.")
-        forecast_combinado_futuro = forecast_prophet_futuro
-
-    print("\n17. EXPORTANDO PREDICCIONES Y VISUALIZANDO ENERGÍA/POTENCIA")
-    print("----------------------------------------------------------")
-    if forecast_combinado_futuro is not None and not forecast_combinado_futuro.empty:
-        # Renombramos temporalmente la columna para que la función de exportación genérica funcione
-        df_export_listo = df_original_tratada.rename(columns={columna_energia: 'Energía'})
-        nombre_archivo_export = f"predicciones_{columna_energia}"
-        ruta_exportacion = exportar_predicciones(forecast_combinado_futuro, df_export_listo, nombre_archivo=nombre_archivo_export, id_datos=id_datos_col, frecuencia=frecuencia)
-        if ruta_exportacion: print(f"Datos para '{columna_energia}' exportados a: {ruta_exportacion}")
-        visualizar_energia_potencia(forecast_combinado_futuro, df_export_listo, incluir_modelos_individuales=True, frecuencia=frecuencia)
-    else:
-        print(f"No hay predicciones combinadas para '{columna_energia}' para exportar o visualizar.")
-        ruta_exportacion = None
-
-    print("\n18. CALCULANDO MÉTRICAS DE VALIDACIÓN DEL ENSAMBLE Y GUARDANDO MODELO")
-    print("-------------------------------------------------------------------")
-    if forecast_combinado_futuro is not None and not forecast_combinado_futuro.empty:
-        val_split_ens = 0.15
-        val_samples = int(len(df_original_tratada) * val_split_ens)
-        if val_samples > 0:
-            y_true_val = df_original_tratada[columna_energia].values[-val_samples:]
-            fechas_val = df_original_tratada['Date'].values[-val_samples:]
-
-            # Corregido: Usar las predicciones de validación desescaladas que ya tenemos
-            preds_p_val = forecast_prophet[forecast_prophet['ds'].isin(fechas_val)] if forecast_prophet is not None else None
-            # Asegurarse de que el slicing es correcto y maneja longitudes desiguales
-            preds_g_val = validation_predictions.get('gru_avanzado')
-            preds_w_val = validation_predictions.get('wavenet')
-            preds_b_val = validation_predictions.get('gradient_boosting')
-
-            # Crear el ensamble con las predicciones de validación
-            ensamble_val = crear_ensamble_mixto(preds_p_val, preds_g_val, preds_w_val, preds_b_val, fechas_val, pesos_ensamble_final)
-            if ensamble_val is not None and not ensamble_val.empty:
-                # Alinear y_true_val con las predicciones del ensamble, que pueden ser más cortas
-                num_predicciones_ensamble = len(ensamble_val['yhat'])
-                y_true_val_alineado = y_true_val[-num_predicciones_ensamble:]
-
-                metricas_ensamble = calcular_metricas_modelo(y_true_val_alineado, ensamble_val['yhat'].values)
-                metricas_todos_modelos['combinado'] = metricas_ensamble
-                print(f"\nMétricas del Ensamble para '{columna_energia}' (sobre validación histórica):", metricas_ensamble)
-
-    modelos_para_guardar = {'prophet': modelo_prophet}
-    if 'gru_avanzado' in modelos_avanzados_entrenados: modelos_para_guardar['gru'] = modelos_avanzados_entrenados['gru_avanzado']['model']
-    if 'wavenet' in modelos_avanzados_entrenados: modelos_para_guardar['wavenet'] = modelos_avanzados_entrenados['wavenet']['model']
-    if 'gradient_boosting' in modelos_avanzados_entrenados: modelos_para_guardar['gbr'] = modelos_avanzados_entrenados['gradient_boosting']['model']
-
-    if forecast_combinado_futuro is not None and not forecast_combinado_futuro.empty:
-        guardar_modelo_ensamblado(modelos_para_guardar, forecast_combinado_futuro, metricas_todos_modelos, pesos_ensamble_final, id_datos_col, columna_energia=columna_energia)
-
-    print("\n" + "="*70 + f"\n¡Proceso para {columna_energia.upper()} completado!\n" + "="*70)
-    return forecast_combinado_futuro, ruta_exportacion
-
-
-# ==============================================================================
-# 8. EXECUTION BLOCK
-# ==============================================================================
-def main():
-    """
-    Función principal que carga los datos, ejecuta el análisis para cada columna de energía,
-    y luego realiza un análisis agregado de los resultados.
-    """
-    print("\n" + "="*70 + "\nSISTEMA DE PRONÓSTICO DE ENERGÍA MULTI-CATEGORÍA\n" + "="*70)
-    print("\n1. CARGANDO DATOS\n-----------------")
-    df_original, _, frecuencia = cargar_datos_desde_drive()
-    if df_original is None:
-        print("No se pudieron cargar los datos. El programa terminará.")
-        return
-
-    print("\n2. CONFIGURACIÓN GENERAL DE LA EJECUCIÓN")
-    print("---------------------------------------")
-
-    # Mover las preguntas al inicio, fuera del bucle
     num_periodos_sug = obtener_periodos_sugeridos(frecuencia)
-    periodos_in = input(f"\n¿Cuántos periodos desea proyectar para todas las categorías? (sugerido: {num_periodos_sug}): ")
+    periodos_in = input(f"\n¿Cuántos periodos desea proyectar? (sugerido: {num_periodos_sug}): ")
     try:
         periodos_futuros = int(periodos_in) if periodos_in.strip() else num_periodos_sug
     except ValueError:
         print(f"Valor no válido. Usando valor sugerido: {num_periodos_sug}")
         periodos_futuros = num_periodos_sug
-    print(f"Se proyectarán {periodos_futuros} periodos ({traducir_periodos_a_texto(periodos_futuros, frecuencia)}) para cada categoría.")
+    print(f"Se proyectarán {periodos_futuros} periodos ({traducir_periodos_a_texto(periodos_futuros, frecuencia)})")
 
-    growth_input = input(f"Tipo de crecimiento para Prophet (linear/logistic) [sugerido: logistic]: ").lower()
-    growth_type = growth_input if growth_input in ['linear', 'logistic'] else 'logistic'
+    print("\nCargando modelos anteriores para aprendizaje continuo...")
+    modelos_anteriores = cargar_modelos_anteriores(id_datos)
 
+    print("\n2. VERIFICANDO MODELOS ANTERIORES (PROPHET ESPECÍFICO)")
+    print("-----------------------------------------------------")
+    mejor_modelo_anterior_prophet = cargar_mejor_modelo_anterior(preguntar=True, id_datos=id_datos)
+
+    print("\n3. ANALIZANDO ESTADÍSTICAS")
+    print("------------------------")
+    analisis_estadistico_energia(df_original_tratada, columna='Energía', frecuencia=frecuencia)
+
+    print("\n4. ANALIZANDO CORRELACIONES")
+    print("-------------------------")
+    visualizar_matriz_correlacion_no_lineal(df_original_tratada, metodo='spearman')
+
+    print("\n5. SELECCIONANDO REGRESORES")
+    print("-------------------------")
+    metodo_corr = 'spearman'
+    umbral_a, umbral_m, umbral_b = sugerir_umbral_correlacion(df_original_tratada, 'Energía', metodo_corr)
+    umbral_sugerido_base = umbral_m # Usar el medio como base
+    if mejor_modelo_anterior_prophet is not None and 'configuracion' in mejor_modelo_anterior_prophet and 'umbral_correlacion' in mejor_modelo_anterior_prophet['configuracion']:
+        umbral_anterior = mejor_modelo_anterior_prophet['configuracion']['umbral_correlacion']
+        print(f"\nUmbral utilizado en el mejor modelo Prophet anterior: {umbral_anterior:.3f}")
+        umbral_sugerido = (umbral_anterior + umbral_sugerido_base) / 2
+    else:
+        umbral_sugerido = umbral_sugerido_base
+    umbral_input = input(f"\nIngrese el umbral para selección de regresores (0.0-1.0) [sugerido: {umbral_sugerido:.3f}]: ")
+    try:
+        umbral_corr = float(umbral_input) if umbral_input.strip() else umbral_sugerido
+    except ValueError:
+        print(f"Valor inválido para umbral. Usando sugerido: {umbral_sugerido:.3f}")
+        umbral_corr = umbral_sugerido
+    regresores = identificar_regresores_no_lineales(df_original_tratada, target_variable='Energía', threshold=umbral_corr, metodo=metodo_corr)
+
+    print("\n6. DEFINIENDO EVENTOS ESPECIALES")
+    print("------------------------------")
+    eventos_especiales = definir_eventos_especiales(frecuencia)
+
+    print("\n7. CONFIGURANDO TIPO DE CRECIMIENTO (PROPHET)")
+    print("-------------------------------------------")
+    growth_type_sugerido = 'logistic'
+    if mejor_modelo_anterior_prophet is not None and 'configuracion' in mejor_modelo_anterior_prophet and 'growth_type' in mejor_modelo_anterior_prophet['configuracion']:
+        growth_type_sugerido = mejor_modelo_anterior_prophet['configuracion']['growth_type']
+    growth_input = input(f"Tipo de crecimiento para Prophet (linear/logistic) [sugerido: {growth_type_sugerido}]: ").lower()
+    growth_type = growth_input if growth_input in ['linear', 'logistic'] else growth_type_sugerido
+
+    print("\n8. PREPARANDO DATOS PARA PROPHET")
+    print("------------------------------")
+    df_prophet = preparar_datos_para_prophet(df_original_tratada, regresores, growth_type, frecuencia)
+
+    print("\n9. DETECTANDO CAMBIOS ESTRUCTURALES")
+    print("---------------------------------")
+    cambios_estructurales = detectar_cambios_estructurales(df_original_tratada, columna='Energía', frecuencia=frecuencia)
+    df_prophet_con_cp = df_prophet.copy()
+    changepoint_features_for_rnn_gbr = None # DataFrame para pasar a modelos avanzados
+    if cambios_estructurales:
+        df_prophet_con_cp = incorporar_cambios_estructurales(df_prophet_con_cp, cambios_estructurales)
+        # Crear DataFrame de features de changepoint para modelos avanzados
+        cp_cols_names_adv = [f'cambio_estructural_{i+1}' for i in range(len(cambios_estructurales))]
+        existing_cp_cols_adv = [col for col in cp_cols_names_adv if col in df_prophet_con_cp.columns]
+        if existing_cp_cols_adv:
+             changepoint_features_for_rnn_gbr = df_prophet_con_cp[['ds'] + existing_cp_cols_adv].copy()
+             print(f"Features de changepoint preparadas para modelos avanzados: {existing_cp_cols_adv}")
+        # Añadir los nuevos regresores de changepoint a la lista de regresores de Prophet si no están ya
+        for cp_col_prophet in existing_cp_cols_adv:
+            if cp_col_prophet not in regresores:
+                regresores.append(cp_col_prophet)
+                print(f"  Regresor '{cp_col_prophet}' añadido a Prophet.")
+    df_para_entrenar_prophet = df_prophet_con_cp
+
+    print("\n10. CONFIGURANDO AJUSTES ADICIONALES (PROPHET)")
+    print("---------------------------------------------")
+      # Preguntar una sola vez
     respuesta_ajuste = input("Aplicar ajustes adicionales a Prophet? (s/n, default: s): ").lower()
-    ajuste_adicional_prophet = respuesta_ajuste != 'n'
 
-    usar_diferenciacion_gbr_input = input("¿Usar diferenciación para GBR en todos los modelos? (s/n, default: s): ").lower()
-    usar_diferenciacion_gbr = usar_diferenciacion_gbr_input != 'n'
+      # Lógica para determinar el valor booleano
+    if respuesta_ajuste == 'n':
+          ajuste_adicional = False
+    else: # Si es 's', vacío (Enter), o cualquier otra cosa, default a True
+          ajuste_adicional = True
 
-    use_attention_gru_input_str = input("¿Usar atención en GRU para todos los modelos? (s/n, default: n): ").lower()
-    usar_atencion_gru = use_attention_gru_input_str == 's'
+    print(f"  Ajustes adicionales para Prophet se aplicarán: {ajuste_adicional}")
 
+
+    print("\n11. OPTIMIZANDO HIPERPARÁMETROS (PROPHET)")
+    print("---------------------------------------")
+    best_params_prophet = None
+    if mejor_modelo_anterior_prophet is not None and 'parametros' in mejor_modelo_anterior_prophet and mejor_modelo_anterior_prophet['parametros'] is not None:
+        param_grid_refinado = refinar_hiperparametros(mejor_modelo_anterior_prophet, df_original_tratada)
+        if param_grid_refinado:
+            print("Optimizando Prophet con grid refinado basado en modelo anterior...")
+            best_params_prophet, _, _ = optimizar_hiperparametros_refinados(
+                df_para_entrenar_prophet, param_grid_refinado, regresores, growth_type, eventos_especiales
+            )
+    if best_params_prophet is None:
+        print("Realizando optimización completa de hiperparámetros para Prophet...")
+        best_params_prophet, _, _ = optimizar_hiperparametros(
+            df_para_entrenar_prophet, regresores, growth_type, eventos_especiales
+        )
+
+    print("\n12. ENTRENANDO MODELO PROPHET FINAL")
+    print("---------------------------------")
+    modelo_prophet, forecast_prophet, metricas_prophet = entrenar_modelo_prophet_continuo(
+        df_para_entrenar_prophet,
+        modelo_anterior=modelos_anteriores.get('prophet_model'),
+        regresores=regresores,
+        growth_type=growth_type,
+        eventos=eventos_especiales,
+        params=best_params_prophet,
+        periodos_futuros=periodos_futuros,
+        ajuste_adicional=ajuste_adicional,
+        frecuencia=frecuencia
+    )
+
+    print("\n13. ENTRENANDO MODELOS AVANZADOS (GRU, WAVENET, GBR) Y CALCULANDO SUS MÉTRICAS DE AJUSTE")
+    print("------------------------------------------------------------------------------------")
+
+
+    usar_diferenciacion_gbr_input = input("¿Usar diferenciación para GBR? (s/n, default: s): ").lower()
+    usar_diferenciacion_gbr_bool = False if usar_diferenciacion_gbr_input == 'n' else True
+    print(f"GBR usará diferenciación: {usar_diferenciacion_gbr_bool}")
+
+    use_attention_gru_input_str = input("¿Usar atención en GRU? (s/n, default: n): ").lower()
+    use_attention_gru_bool = use_attention_gru_input_str == 's'
+    mi_config_gru = {
+        'gru_units': [96, 48], 'dense_units': [24], 'dropout_rate': 0.2,
+        'bidirectional': True, 'use_attention': use_attention_gru_bool, 'attention_heads': 4,
+        'activation_gru': 'tanh', 'activation_dense': 'relu',
+        'optimizer_type': 'adamw', 'learning_rate': 0.001, 'loss_function': 'huber'
+    }
+    mi_config_wavenet = {
+        'initial_conv_filters': 48, 'residual_block_layers': 2, 'filters_per_block': 48,
+        'kernel_size': 3, 'dilation_rates': [1, 2, 4, 8, 16], 'final_conv_filters': 96,
+        'dense_units': [48, 24], 'dropout_rate': 0.2,
+        'activation_conv': 'relu', 'activation_dense': 'relu',
+        'optimizer_type': 'adam', 'learning_rate': 0.001, 'loss_function': 'mse'
+    }
     gbr_loss_options = ['huber', 'squared_error', 'absolute_error', 'quantile']
-    gbr_loss_input = input(f"Pérdida para GBR en todos los modelos ({', '.join(gbr_loss_options)}, default: huber): ").lower()
+    gbr_loss_input = input(f"Pérdida para GBR ({', '.join(gbr_loss_options)}, default: huber): ").lower()
     if gbr_loss_input not in gbr_loss_options: gbr_loss_input = 'huber'
-
-    params_ejecucion = {
-        'periodos_futuros': periodos_futuros,
-        'preguntar_cargar_modelos': False, # No preguntar en cada iteración
-        'growth_type': growth_type,
-        'ajuste_adicional_prophet': ajuste_adicional_prophet,
-        'usar_diferenciacion_gbr': usar_diferenciacion_gbr,
-        'usar_atencion_gru': usar_atencion_gru,
-        'gbr_loss': gbr_loss_input
+    mi_config_gbr = {
+        'n_estimators': 600, 'learning_rate': 0.02, 'max_depth': 5,
+        'min_samples_split': 10, 'min_samples_leaf': 5, 'subsample': 0.8, 'max_features': 'sqrt',
+        'loss': gbr_loss_input, 'n_iter_no_change': 30, 'tol': 1e-5
     }
 
-    columnas_energia_a_procesar = ['residencial', 'comercial', 'industrial', 'otros', 'alumbrado publico']
-    resultados_agregados = {}
+    modelos_avanzados_entrenados, time_steps_usados_en_avanzados = entrenar_modelos_avanzados_continuo( # MODIFICADO: Recibir dos valores
+        df=df_original_tratada,
+        modelo_gru_anterior=modelos_anteriores.get('gru_model'),
+        modelo_wavenet_anterior=modelos_anteriores.get('wavenet_model'),
+        modelo_gbr_anterior=modelos_anteriores.get('gbr_model'),
+        columna='Energía',
+        epocas=100,
+        val_split=0.15,
+        batch_size=32,
+        id_datos=id_datos,
+        frecuencia=frecuencia,
+        usar_diferenciacion_gbr=usar_diferenciacion_gbr_bool, # Asumiendo que esta variable está definida
+        changepoint_features=changepoint_features_for_rnn_gbr, # Asumiendo que esta variable está definida
+        config_gru=mi_config_gru, # Asumiendo que esta variable está definida
+        config_wavenet=mi_config_wavenet, # Asumiendo que esta variable está definida
+        config_gbr=mi_config_gbr, # Asumiendo que esta variable está definida
+        use_reduce_lr_plateau=True,
+        early_stopping_patience=15,
+        disable_tqdm_callback_keras=False # O True, según tu prueba
+    )
+    print(f"DEBUG (main_avanzado): Time steps usados en el entrenamiento de modelos avanzados: {time_steps_usados_en_avanzados}")
 
-    for i, columna in enumerate(columnas_energia_a_procesar):
-        if i == 0:
-            params_ejecucion['preguntar_cargar_modelos'] = True # Preguntar solo la primera vez
+    # Diccionario para todas las métricas, Prophet ya está.
+    metricas_todos_modelos = {'prophet': metricas_prophet if metricas_prophet else {}}
+    datos_historicos_eval_energia_abs = df_original_tratada['Energía'].values # Absolutos
+
+    # --- CÁLCULO DE MÉTRICAS DE AJUSTE PARA MODELOS AVANZADOS ---
+    print("\nCalculando Métricas de AJUSTE para modelos avanzados (sobre el histórico completo):")
+    mejor_modelo_gru_info = modelos_avanzados_entrenados.get('gru_avanzado')
+    mejor_modelo_wavenet_info = modelos_avanzados_entrenados.get('wavenet')
+    mejor_modelo_gbr_info = modelos_avanzados_entrenados.get('gradient_boosting') # Clave correcta
+
+    for mk_fit, mi_fit in [('gru', mejor_modelo_gru_info),
+                           ('wavenet', mejor_modelo_wavenet_info),
+                           ('gbr', mejor_modelo_gbr_info)]: # Nombre 'gbr' para consistencia
+        if mi_fit and 'model' in mi_fit and 'scaler' in mi_fit and 'time_steps' in mi_fit:
+            print(f"  Calculando métricas de ajuste para {mk_fit.upper()}...")
+
+            model_to_eval = mi_fit['model']
+            scaler_eval = mi_fit['scaler']
+            ts_eval = mi_fit['time_steps']
+            # n_features_model_input_eval es el número de columnas que ESPERA el modelo.input_shape o GBR.n_features_in_
+            n_features_model_input_eval = model_to_eval.input_shape[-1] if hasattr(model_to_eval, 'input_shape') and mk_fit != 'gbr' else \
+                                          (model_to_eval.n_features_in_ if hasattr(model_to_eval, 'n_features_in_') and mk_fit == 'gbr' else \
+                                           mi_fit.get('n_features_model_input', 1)) # Fallback
+
+            scaler_n_features_original_fit_eval = mi_fit['scaler_n_features_original_fit']
+            scaler_target_idx_eval = mi_fit['scaler_target_idx']
+            feature_names_input_eval = mi_fit.get('feature_names_input', [])
+            is_gbr_diff_eval = mk_fit == 'gbr' and mi_fit.get('usar_diferenciacion', False)
+
+            X_model_fit_metric, y_true_fit_metric_abs = [None, None]
+
+            if mk_fit in ['gru', 'wavenet']:
+                features_list_fit_metric_rnn = [datos_historicos_eval_energia_abs.astype(float)]
+                if n_features_model_input_eval > 1:
+                    if changepoint_features_for_rnn_gbr is not None and not changepoint_features_for_rnn_gbr.empty:
+                        # ... (lógica de merge de CPs para RNNs, como en la respuesta anterior)
+                        df_hist_for_cp_merge = df_original_tratada[['Date']].copy(); df_hist_for_cp_merge['Date_dt_merge'] = pd.to_datetime(df_hist_for_cp_merge['Date'])
+                        cp_feat_df_eval = changepoint_features_for_rnn_gbr.copy(); cp_feat_df_eval['ds'] = pd.to_datetime(cp_feat_df_eval['ds'])
+                        df_merged_hist_cp_eval = pd.merge(df_hist_for_cp_merge, cp_feat_df_eval, left_on='Date_dt_merge', right_on='ds', how='left', suffixes=('', '_cp_eval')).ffill().bfill()
+                        cp_names_from_model_info = feature_names_input_eval[1:] if feature_names_input_eval and len(feature_names_input_eval) > 1 else []
+                        for cp_name_eval in cp_names_from_model_info:
+                            if cp_name_eval in df_merged_hist_cp_eval.columns: features_list_fit_metric_rnn.append(df_merged_hist_cp_eval[cp_name_eval].values.astype(float))
+                            else: features_list_fit_metric_rnn.append(np.zeros_like(datos_historicos_eval_energia_abs))
+                    else: # Modelo espera CPs pero no hay DataFrame de CPs
+                        for _ in range(n_features_model_input_eval - 1): features_list_fit_metric_rnn.append(np.zeros_like(datos_historicos_eval_energia_abs))
+
+                all_features_array_fit_metric = np.stack(features_list_fit_metric_rnn, axis=-1)
+                if all_features_array_fit_metric.shape[1] != scaler_n_features_original_fit_eval:
+                    print(f"    Error métricas {mk_fit}: Discrepancia features para scaler. Esperado {scaler_n_features_original_fit_eval}, real {all_features_array_fit_metric.shape[1]}. Saltando."); continue
+                data_scaled_fit_metric = scaler_eval.transform(all_features_array_fit_metric)
+                X_model_fit_metric, _ = crear_dataset_secuencial(data_scaled_fit_metric, ts_eval)
+                if X_model_fit_metric.shape[0] == 0: print(f"    No hay secuencias para métricas {mk_fit}."); continue
+                y_true_fit_metric_abs = datos_historicos_eval_energia_abs[ts_eval : ts_eval + X_model_fit_metric.shape[0]]
+
+            elif mk_fit == 'gbr':
+                base_energy_gbr = np.diff(datos_historicos_eval_energia_abs) if is_gbr_diff_eval else datos_historicos_eval_energia_abs
+                if len(base_energy_gbr) <= ts_eval: print(f"    Datos insuficientes GBR lags métricas {mk_fit}."); continue
+                scaled_energy_gbr = scaler_eval.transform(base_energy_gbr.reshape(-1,1))
+                X_gbr_energy_lags_3d, _ = crear_dataset_secuencial(scaled_energy_gbr, ts_eval)
+                if X_gbr_energy_lags_3d.shape[0] == 0: print(f"    No hay secuencias energía GBR métricas {mk_fit}."); continue
+
+                num_gbr_samples_fit = X_gbr_energy_lags_3d.shape[0]
+                X_gbr_feat_list = [X_gbr_energy_lags_3d.reshape(num_gbr_samples_fit, -1)]
+
+                # Reconstruir CPs para GBR
+                # Asumimos que feature_names_input_eval (debería ser gbr_feature_names_constructed)
+                # nos da la estructura de X_train_gbr.
+                # n_features_model_input_eval debe ser el número total de columnas en X_train_gbr
+                if n_features_model_input_eval > ts_eval: # Implica CPs
+                    if changepoint_features_for_rnn_gbr is not None and not changepoint_features_for_rnn_gbr.empty:
+                        df_hist_gbr_cp = df_original_tratada[['Date']].copy(); df_hist_gbr_cp['Date_dt_merge'] = pd.to_datetime(df_hist_gbr_cp['Date'])
+                        cp_df_gbr_eval = changepoint_features_for_rnn_gbr.copy(); cp_df_gbr_eval['ds'] = pd.to_datetime(cp_df_gbr_eval['ds'])
+                        df_merged_gbr_cp = pd.merge(df_hist_gbr_cp, cp_df_gbr_eval, left_on='Date_dt_merge', right_on='ds', how='left').ffill().bfill()
+
+                        # Inferir qué CPs se usaron. feature_names_input_eval para GBR (si se guardó bien) es la lista de nombres de columnas de X_train_gbr
+                        # Este es el punto más débil si feature_names_input_eval no es preciso para GBR.
+                        num_cp_sets_expected = (n_features_model_input_eval // ts_eval) - 1 if n_features_model_input_eval > ts_eval and n_features_model_input_eval % ts_eval == 0 else 0
+
+                        # Heurística: tomar las primeras num_cp_sets_expected de changepoint_features_for_rnn_gbr
+                        available_cp_names_global = [c for c in changepoint_features_for_rnn_gbr.columns if c != 'ds']
+                        for i_cp_set in range(min(num_cp_sets_expected, len(available_cp_names_global))):
+                            cp_name_to_use = available_cp_names_global[i_cp_set]
+                            if cp_name_to_use in df_merged_gbr_cp.columns:
+                                cp_data_series = df_merged_gbr_cp[cp_name_to_use].values.astype(float)
+                                if len(cp_data_series) > ts_eval:
+                                    X_cp_lags_3d, _ = crear_dataset_secuencial(cp_data_series.reshape(-1,1), ts_eval)
+                                    if X_cp_lags_3d.shape[0] >= num_gbr_samples_fit:
+                                        X_gbr_feat_list.append(X_cp_lags_3d[-num_gbr_samples_fit:].reshape(num_gbr_samples_fit, -1))
+
+                X_model_fit_metric = np.concatenate(X_gbr_feat_list, axis=1)
+                if X_model_fit_metric.shape[1] != n_features_model_input_eval:
+                    print(f"    Error métricas GBR: Discrepancia final features. Esperado {n_features_model_input_eval}, real {X_model_fit_metric.shape[1]}. Saltando."); continue
+
+                if is_gbr_diff_eval: y_true_fit_metric_abs = datos_historicos_eval_energia_abs[ts_eval + 1 : ts_eval + 1 + num_gbr_samples_fit]
+                else: y_true_fit_metric_abs = datos_historicos_eval_energia_abs[ts_eval : ts_eval + num_gbr_samples_fit]
+
+            if X_model_fit_metric is None or y_true_fit_metric_abs is None or X_model_fit_metric.shape[0] != len(y_true_fit_metric_abs):
+                print(f"    Error métricas {mk_fit}: Desalineación X ({X_model_fit_metric.shape[0] if X_model_fit_metric is not None else 'None'}) e y_true ({len(y_true_fit_metric_abs) if y_true_fit_metric_abs is not None else 'None'}). Saltando."); continue
+
+            preds_scaled_fit = model_to_eval.predict(X_model_fit_metric)
+
+            preds_unscaled_fit_target_only = None
+            if mk_fit == 'gbr': # Scaler de GBR es univariado
+                preds_unscaled_fit_target_only = scaler_eval.inverse_transform(preds_scaled_fit.reshape(-1,1)).flatten()
+            else: # Scaler de RNN es multivariado
+                temp_preds_for_inv_transform = np.zeros((preds_scaled_fit.shape[0], scaler_n_features_original_fit_eval))
+                temp_preds_for_inv_transform[:, scaler_target_idx_eval] = preds_scaled_fit.flatten()
+                preds_unscaled_fit_target_only = scaler_eval.inverse_transform(temp_preds_for_inv_transform)[:, scaler_target_idx_eval]
+
+            preds_absolute_final_fit = preds_unscaled_fit_target_only
+            if is_gbr_diff_eval:
+                base_vals_gbr_recon = datos_historicos_eval_energia_abs[ts_eval : ts_eval + len(preds_unscaled_fit_target_only)]
+                if len(base_vals_gbr_recon) == len(preds_unscaled_fit_target_only):
+                    preds_absolute_final_fit = base_vals_gbr_recon + preds_unscaled_fit_target_only
+                else: print(f"    Error métricas GBR: Desajuste longitud reconstrucción. Saltando."); continue
+
+            min_len_met = min(len(y_true_fit_metric_abs), len(preds_absolute_final_fit))
+            if min_len_met > 0:
+                metricas_todos_modelos[mk_fit] = calcular_metricas_modelo(y_true_fit_metric_abs[:min_len_met], preds_absolute_final_fit[:min_len_met])
+                print(f"    Métricas para {mk_fit.upper()}: {metricas_todos_modelos[mk_fit]}")
+            else: metricas_todos_modelos[mk_fit] = {k: np.nan for k in ['RMSE','MAE','R2','MAPE']}
         else:
-            params_ejecucion['preguntar_cargar_modelos'] = False
+            print(f"  Información incompleta o modelo no entrenado para {mk_fit}. No se calculan métricas de ajuste.")
+            metricas_todos_modelos[mk_fit] = {k: np.nan for k in ['RMSE','MAE','R2','MAPE']}
 
-        if columna in df_original.columns:
-            forecast_df, _ = ejecutar_analisis_para_columna(df_original, columna, frecuencia, params_ejecucion)
-            resultados_agregados[columna] = forecast_df
-        else:
-            print(f"\nADVERTENCIA: La columna '{columna}' no se encontró en el archivo. Saltando su análisis.")
+    # --- IMPRESIÓN DE LA TABLA DE MÉTRICAS DE AJUSTE ---
+    print("\n" + "="*20 + " MÉTRICAS DE AJUSTE (SOBRE HISTÓRICO) " + "="*20)
+    metric_table_data_ajuste = {'Métrica': ['RMSE', 'MAE', 'R2', 'MAPE']}
+    for model_name_print in ['prophet', 'gru', 'wavenet', 'gbr']:
+        metrics_actual = metricas_todos_modelos.get(model_name_print, {})
+        metric_table_data_ajuste[model_name_print.upper()] = [metrics_actual.get(m, np.nan) for m in ['RMSE', 'MAE', 'R2', 'MAPE']]
+    df_metric_table_ajuste = pd.DataFrame(metric_table_data_ajuste)
+    print(df_metric_table_ajuste.to_string(index=False, float_format='%.4f'))
+    print("="*60)
 
-    # Después de procesar todas las columnas, ejecutar el análisis agregado
-    if resultados_agregados:
-        analizar_y_visualizar_agregado(resultados_agregados)
 
-def analizar_y_visualizar_agregado(resultados_por_columna):
-    """
-    Toma los resultados de pronóstico de múltiples columnas de energía,
-    los combina y genera visualizaciones y análisis agregados.
+    print("\n14. GENERANDO PREDICCIONES FUTURAS (INDIVIDUALES)")
+    print("-------------------------------------------------")
+    ultima_fecha_historica = df_para_entrenar_prophet['ds'].max()
+    fechas_futuras = pd.date_range(start=ultima_fecha_historica, periods=periodos_futuros + 1, freq=obtener_freq_prophet(frecuencia))[1:]
+    forecast_prophet_futuro = forecast_prophet[forecast_prophet['ds'] > ultima_fecha_historica].copy()
 
-    Args:
-        resultados_por_columna (dict): Un diccionario donde las claves son los
-                                       nombres de las columnas de energía y los
-                                       valores son los DataFrames de pronóstico
-                                       combinado para cada columna.
-    """
-    print("\n" + "="*70)
-    print("INICIANDO ANÁLISIS AGREGADO DE TODAS LAS CATEGORÍAS")
-    print("="*70)
+    predicciones_gru, predicciones_wavenet, predicciones_gbr = None, None, None
+    # mejor_modelo_gru_info, etc. ya están definidos arriba
+    datos_hist_para_pred_futura_energia_abs = df_original_tratada['Energía'].values # Absolutos
 
-    if not resultados_por_columna:
-        print("No se proporcionaron resultados para el análisis agregado. Saltando.")
-        return
+    if mejor_modelo_gru_info and 'model' in mejor_modelo_gru_info:
+        predicciones_gru = predecir_con_rnn(mejor_modelo_gru_info, datos_hist_para_pred_futura_energia_abs, periodos_futuros, obtener_estacionalidad(frecuencia), frecuencia, changepoint_features_for_rnn_gbr) # Pasar CPs futuras
+        print("Predicciones GRU (futuras) generadas.")
+    if mejor_modelo_wavenet_info and 'model' in mejor_modelo_wavenet_info:
+        predicciones_wavenet = predecir_con_rnn(mejor_modelo_wavenet_info, datos_hist_para_pred_futura_energia_abs, periodos_futuros, obtener_estacionalidad(frecuencia), frecuencia, changepoint_features_for_rnn_gbr)
+        print("Predicciones WaveNet (futuras) generadas.")
+    if mejor_modelo_gbr_info and 'model' in mejor_modelo_gbr_info:
+        predicciones_gbr = predecir_con_gbr(mejor_modelo_gbr_info, datos_hist_para_pred_futura_energia_abs, periodos_futuros, frecuencia, changepoint_features_for_rnn_gbr)
+        print("Predicciones GBR (futuras) generadas.")
 
-    # 1. Combinar todos los resultados en un único DataFrame
-    df_combinado = pd.DataFrame()
-    for col_energia, df_forecast in resultados_por_columna.items():
-        if df_forecast is not None and not df_forecast.empty:
-            df_temp = df_forecast[['ds', 'yhat']].copy()
-            df_temp = df_temp.rename(columns={'yhat': col_energia})
-            if df_combinado.empty:
-                df_combinado = df_temp
+
+    print("\n15. COMPARANDO PREDICCIONES INDIVIDUALES FUTURAS")
+    print("------------------------------------------------")
+    # ... (Plot de comparación, como antes) ...
+    plt.figure(figsize=(15, 8))
+    plt.plot(df_original_tratada['Date'], df_original_tratada['Energía'], label='Histórico (Tratado)', alpha=0.7, marker='o', markersize=2, color='black')
+    if not forecast_prophet_futuro.empty: plt.plot(forecast_prophet_futuro['ds'], forecast_prophet_futuro['yhat'], label='Prophet', color='blue', linewidth=1.5)
+    if predicciones_gru is not None: plt.plot(fechas_futuras[:len(predicciones_gru)], predicciones_gru, label='GRU', color='red', linestyle='--', linewidth=1.5)
+    if predicciones_wavenet is not None: plt.plot(fechas_futuras[:len(predicciones_wavenet)], predicciones_wavenet, label='WaveNet', color='green', linestyle='-.', linewidth=1.5)
+    if predicciones_gbr is not None: plt.plot(fechas_futuras[:len(predicciones_gbr)], predicciones_gbr, label='GBR', color='orange', linestyle=':', linewidth=1.5)
+    plt.title('Comparación de Modelos (Proyecciones Futuras)'); plt.xlabel('Fecha'); plt.ylabel('Energía'); plt.legend(); plt.grid(True); plt.tight_layout(); plt.show()
+
+
+    print("\n16. CREANDO ENSAMBLE DE MODELOS (INTERACTIVO)")
+    print("--------------------------------------------")
+    # ... (Lógica para pedir pesos del ensamble, como antes) ...
+    # ... (Asegúrate que forecast_combinado_futuro se genere correctamente) ...
+    forecast_combinado_futuro = None; pesos_ensamble_final = {}
+    active_models_for_ensemble = []
+    if not forecast_prophet_futuro.empty: active_models_for_ensemble.append('prophet')
+    if predicciones_gru is not None: active_models_for_ensemble.append('rnn')
+    if predicciones_wavenet is not None: active_models_for_ensemble.append('avanzado')
+    if predicciones_gbr is not None: active_models_for_ensemble.append('gbr')
+
+    if active_models_for_ensemble:
+        print("\nPesos para el ensamble (0.0-1.0, la suma se normalizará a 1):")
+        default_weight = 1.0 / len(active_models_for_ensemble) if active_models_for_ensemble else 1.0
+        pesos_input_user = {}
+        for model_key_ens in active_models_for_ensemble:
+            user_w_input = input(f"Peso para {model_key_ens.upper()} (sugerido: {default_weight:.2f}): ")
+            try: pesos_input_user[model_key_ens] = float(user_w_input) if user_w_input.strip() else default_weight
+            except ValueError: pesos_input_user[model_key_ens] = default_weight
+        total_weight_input = sum(pesos_input_user.values())
+        if total_weight_input > 0: pesos_ensamble_final = {k: v / total_weight_input for k, v in pesos_input_user.items()}
+        elif active_models_for_ensemble: pesos_ensamble_final = {k: 1.0/len(active_models_for_ensemble) for k in active_models_for_ensemble}
+        print(f"\nPesos finales del ensamble: {pesos_ensamble_final}")
+        forecast_combinado_futuro = crear_ensamble_mixto(forecast_prophet_futuro, predicciones_gru, predicciones_wavenet, predicciones_gbr, fechas_futuras, pesos_ensamble_final)
+        # ... (Plot del ensamble combinado, como antes) ...
+        df_hist_energia_plot = df_original_tratada[['Date', 'Energía']].copy(); df_hist_energia_plot.columns = ['ds', 'yhat']; df_hist_energia_plot['tipo'] = 'histórico'
+        forecast_completo_display = df_hist_energia_plot.copy()
+        if forecast_combinado_futuro is not None and not forecast_combinado_futuro.empty:
+            fc_futuro_plot = forecast_combinado_futuro.copy(); fc_futuro_plot['tipo'] = 'proyección'
+            all_cols_plot = list(set(forecast_completo_display.columns) | set(fc_futuro_plot.columns))
+            for df_part_plot in [forecast_completo_display, fc_futuro_plot]:
+                for col_plot in all_cols_plot:
+                    if col_plot not in df_part_plot.columns: df_part_plot[col_plot] = np.nan
+            forecast_completo_display = pd.concat([forecast_completo_display[all_cols_plot], fc_futuro_plot[all_cols_plot]], ignore_index=True).sort_values('ds')
+        plt.figure(figsize=(15, 8)); hist_data_plot = forecast_completo_display[forecast_completo_display['tipo']=='histórico']
+        if not hist_data_plot.empty: plt.plot(hist_data_plot['ds'], hist_data_plot['yhat'], label='Histórico (Tratado)', alpha=0.8, marker='o', markersize=2, color='black')
+        proy_data_plot = forecast_completo_display[forecast_completo_display['tipo']=='proyección']
+        if not proy_data_plot.empty and 'yhat' in proy_data_plot.columns:
+            plt.plot(proy_data_plot['ds'], proy_data_plot['yhat'], label='Ensamble Proyectado', color='purple', linewidth=2.5)
+            if 'yhat_lower' in proy_data_plot.columns and 'yhat_upper' in proy_data_plot.columns: plt.fill_between(proy_data_plot['ds'], proy_data_plot['yhat_lower'], proy_data_plot['yhat_upper'], color='purple', alpha=0.2)
+        plt.axvline(x=ultima_fecha_historica, color='grey', linestyle='--', label='Inicio Proyección'); plt.title('Proyección Final del Ensamble'); plt.xlabel('Fecha'); plt.ylabel('Energía'); plt.legend(); plt.grid(True); plt.tight_layout(); plt.show()
+    else: # Fallback si no hay modelos para ensamble
+        print("No hay modelos con predicciones válidas para ensamble. Usando Prophet si está disponible.")
+        if not forecast_prophet_futuro.empty:
+            forecast_combinado_futuro = forecast_prophet_futuro.copy()
+            if 'yhat_prophet' not in forecast_combinado_futuro.columns and 'yhat' in forecast_combinado_futuro.columns : forecast_combinado_futuro['yhat_prophet'] = forecast_combinado_futuro['yhat']
+            for m_k_ph_ens in ['rnn', 'avanzado', 'gbr']:
+                if f'yhat_{m_k_ph_ens}' not in forecast_combinado_futuro.columns: forecast_combinado_futuro[f'yhat_{m_k_ph_ens}'] = np.nan
+            pesos_ensamble_final = {'prophet': 1.0}
+        else: print("ERROR: No hay predicciones de Prophet. No se puede continuar."); return None, None
+
+
+    print("\n17. EXPORTANDO PREDICCIONES Y VISUALIZANDO ENERGÍA/POTENCIA")
+    print("----------------------------------------------------------")
+    # ... (Lógica de exportación y visualización E/P, como antes) ...
+    nombre_archivo_export_input = input("Nombre para archivo de predicciones (Enter para auto): ")
+    incluir_potencia_export_bool = input("Incluir cálculos de potencia en exportación? (s/n, default: s): ").lower() != 'n'
+    if forecast_combinado_futuro is not None:
+        for mk_exp_check in ['prophet', 'rnn', 'avanzado', 'gbr']:
+            if f'yhat_{mk_exp_check}' not in forecast_combinado_futuro.columns: forecast_combinado_futuro[f'yhat_{mk_exp_check}'] = np.nan
+    ruta_exportacion = exportar_predicciones(forecast_combinado_futuro, df_original_tratada, nombre_archivo_export_input if nombre_archivo_export_input.strip() else None, id_datos, incluir_potencia_export_bool, frecuencia)
+    if ruta_exportacion: print(f"Datos exportados a: {ruta_exportacion}")
+    else: print("Fallo en la exportación de datos.")
+    if input("Visualizar gráficos de Energía y Potencia? (s/n, default: s): ").lower() != 'n':
+        incluir_individuales_viz_bool = input("Incluir modelos individuales en gráficos de E/P? (s/n, default: s): ").lower() != 'n'
+        visualizar_energia_potencia(forecast_combinado_futuro, df_original_tratada, incluir_individuales_viz_bool, 'ajustada', frecuencia=frecuencia)
+
+
+    print("\n18. CALCULANDO MÉTRICAS DE VALIDACIÓN DEL ENSAMBLE Y GUARDANDO MODELO")
+    print("-------------------------------------------------------------------")
+
+    # Asegurar que las métricas de Prophet estén en el diccionario principal
+    if 'prophet' not in metricas_todos_modelos or not metricas_todos_modelos['prophet']:
+        metricas_todos_modelos['prophet'] = metricas_prophet if metricas_prophet else {}
+
+    datos_historicos_eval_energia_abs = df_original_tratada['Energía'].values
+    fechas_historicas_eval = pd.to_datetime(df_original_tratada['Date'].values) # Asegurar que sea datetime
+
+    val_split_para_ensamble_metricas = 0.15 # Proporción del histórico para validación del ensamble
+    ts_eval_ensamble_metricas = time_steps_usados_en_avanzados # Correcto: usa el valor devuelto
+
+    n_total_energia_metricas = len(datos_historicos_eval_energia_abs)
+    num_total_sequences_metricas = n_total_energia_metricas - ts_eval_ensamble_metricas
+
+    # Inicializar placeholders para predicciones de validación de modelos avanzados
+    preds_val_prophet_ens_m, preds_val_gru_ens_m, preds_val_wavenet_ens_m, preds_val_gbr_ens_m = [None]*4
+
+    if num_total_sequences_metricas > 0:
+        num_val_samples_ens_metricas = int(num_total_sequences_metricas * val_split_para_ensamble_metricas)
+        # Asegurar al menos una muestra de validación si es posible
+        if num_val_samples_ens_metricas == 0 and num_total_sequences_metricas > 0:
+            num_val_samples_ens_metricas = 1
+
+        if num_val_samples_ens_metricas > 0 and n_total_energia_metricas - num_val_samples_ens_metricas >= 0 :
+            start_idx_y_val_ens_metricas = n_total_energia_metricas - num_val_samples_ens_metricas
+            y_true_val_ensamble_metricas = datos_historicos_eval_energia_abs[start_idx_y_val_ens_metricas:]
+            fechas_val_ensamble_metricas = fechas_historicas_eval[start_idx_y_val_ens_metricas:]
+
+            print(f"  Intentando calcular métricas de validación del ensamble sobre {len(y_true_val_ensamble_metricas)} muestras históricas.")
+
+            # 1. Predicciones de Prophet para el periodo de validación del ensamble
+            if forecast_prophet is not None:
+                df_prophet_hist_preds_m = forecast_prophet[forecast_prophet['ds'] <= ultima_fecha_historica].copy()
+                # Hacer merge para alinear con las fechas de validación del ensamble
+                df_prophet_val_preds_ens_merged_m = pd.merge(
+                    pd.DataFrame({'ds': fechas_val_ensamble_metricas}),
+                    df_prophet_hist_preds_m[['ds', 'yhat', 'yhat_lower', 'yhat_upper']],
+                    on='ds',
+                    how='left'
+                ).ffill().bfill() # Rellenar por si hay desajustes de frecuencia exactos
+
+                if not df_prophet_val_preds_ens_merged_m.empty and 'yhat' in df_prophet_val_preds_ens_merged_m:
+                    preds_val_prophet_ens_m = df_prophet_val_preds_ens_merged_m['yhat'].values
+                else:
+                    print("  Advertencia: No se pudieron obtener predicciones de Prophet para el conjunto de validación del ensamble.")
+                    preds_val_prophet_ens_m = np.full(len(y_true_val_ensamble_metricas), np.nan) if y_true_val_ensamble_metricas is not None else None
+
+            # 2. PLACEHOLDER para predicciones de validación de modelos avanzados (GRU, WaveNet, GBR)
+            #    Idealmente, estas se obtendrían de las predicciones `y_val_plot_pred_desnorm`
+            #    generadas durante `entrenar_modelos_avanzados_continuo` para cada modelo,
+            #    y luego se alinearían con `y_true_val_ensamble_metricas`.
+            #    Esto requiere que `entrenar_modelos_avanzados_continuo` devuelva estas predicciones.
+            print("  (Nota: Predicciones de validación para GRU/WaveNet/GBR para métricas de ensamble son placeholders).")
+            # Si tienes las preds de validación de entrenar_modelos_avanzados_continuo, las usarías aquí.
+            # Ejemplo (si `modelos_avanzados_entrenados` guardara `y_val_pred_desnorm`):
+            # if mejor_modelo_gru_info and 'y_val_pred_desnorm' in mejor_modelo_gru_info:
+            #     preds_val_gru_ens_m = alinear_o_tomar_ultimos(mejor_modelo_gru_info['y_val_pred_desnorm'], len(y_true_val_ensamble_metricas))
+            # else:
+            preds_val_gru_ens_m = np.full_like(y_true_val_ensamble_metricas, np.nan) if y_true_val_ensamble_metricas is not None else None
+            preds_val_wavenet_ens_m = np.full_like(y_true_val_ensamble_metricas, np.nan) if y_true_val_ensamble_metricas is not None else None
+            preds_val_gbr_ens_m = np.full_like(y_true_val_ensamble_metricas, np.nan) if y_true_val_ensamble_metricas is not None else None
+
+
+            # 3. Alinear todas las predicciones de validación a la longitud mínima
+            all_preds_val_list_m = [y_true_val_ensamble_metricas, preds_val_prophet_ens_m,
+                                    preds_val_gru_ens_m, preds_val_wavenet_ens_m, preds_val_gbr_ens_m]
+
+            # Filtrar Nones y obtener longitudes
+            valid_preds_objects_m = [p for p in all_preds_val_list_m if p is not None and hasattr(p, '__len__') and len(p) > 0]
+
+            if valid_preds_objects_m:
+                min_len_val_ens_m = min(len(p) for p in valid_preds_objects_m)
+
+                if min_len_val_ens_m > 0:
+                    y_true_f = y_true_val_ensamble_metricas[-min_len_val_ens_m:]
+                    fechas_f = fechas_val_ensamble_metricas[-min_len_val_ens_m:]
+
+                    preds_p_f_m = preds_val_prophet_ens_m[-min_len_val_ens_m:] if preds_val_prophet_ens_m is not None and len(preds_val_prophet_ens_m) >= min_len_val_ens_m else np.full(min_len_val_ens_m, np.nan)
+                    preds_gru_f_m = preds_val_gru_ens_m[-min_len_val_ens_m:] if preds_val_gru_ens_m is not None and len(preds_val_gru_ens_m) >= min_len_val_ens_m else np.full(min_len_val_ens_m, np.nan)
+                    preds_wav_f_m = preds_val_wavenet_ens_m[-min_len_val_ens_m:] if preds_val_wavenet_ens_m is not None and len(preds_val_wavenet_ens_m) >= min_len_val_ens_m else np.full(min_len_val_ens_m, np.nan)
+                    preds_gbr_f_m = preds_val_gbr_ens_m[-min_len_val_ens_m:] if preds_val_gbr_ens_m is not None and len(preds_val_gbr_ens_m) >= min_len_val_ens_m else np.full(min_len_val_ens_m, np.nan)
+
+                    df_prophet_val_ens_m = pd.DataFrame({'ds': fechas_f, 'yhat': preds_p_f_m})
+                    if 'yhat_lower' in df_prophet_val_preds_ens_merged_m.columns and len(df_prophet_val_preds_ens_merged_m) >= min_len_val_ens_m:
+                        df_prophet_val_ens_m['yhat_lower'] = df_prophet_val_preds_ens_merged_m['yhat_lower'].ffill().bfill().values[-min_len_val_ens_m:]
+                        df_prophet_val_ens_m['yhat_upper'] = df_prophet_val_preds_ens_merged_m['yhat_upper'].ffill().bfill().values[-min_len_val_ens_m:]
+                    else: # Fallback si las columnas CI no están o hay desajuste
+                        df_prophet_val_ens_m['yhat_lower'] = preds_p_f_m
+                        df_prophet_val_ens_m['yhat_upper'] = preds_p_f_m
+
+                    # Crear ensamble con las predicciones de validación (posiblemente placeholders)
+                    forecast_ensamble_val_m = crear_ensamble_mixto(
+                        df_prophet_val_ens_m, preds_gru_f_m, preds_wav_f_m, preds_gbr_f_m,
+                        fechas_f, pesos=pesos_ensamble_final # pesos_ensamble_final debe estar definido de la Sección 16
+                    )
+
+                    if forecast_ensamble_val_m is not None and \
+                       'yhat' in forecast_ensamble_val_m.columns and \
+                       not forecast_ensamble_val_m['yhat'].isnull().all() and \
+                       len(forecast_ensamble_val_m['yhat']) == len(y_true_f):
+
+                        metricas_ensamble_val_final = calcular_metricas_modelo(y_true_f, forecast_ensamble_val_m['yhat'].values)
+                        metricas_todos_modelos['combinado_val'] = metricas_ensamble_val_final
+                        print("\nMétricas del Ensamble (sobre validación histórica - APROXIMADO si se usaron placeholders):")
+                        for k_met_ens, v_met_ens in metricas_ensamble_val_final.items():
+                            print(f"  {k_met_ens}: {v_met_ens:.4f}")
+                    else:
+                        print("  No se pudieron generar predicciones de ensamble válidas o alineadas para el conjunto de validación de métricas.")
+                        if 'combinado_val' in metricas_todos_modelos: del metricas_todos_modelos['combinado_val']
+                else:
+                    print("  Longitud mínima de predicciones de validación para métricas del ensamble es 0 o y_true es más corto.")
             else:
-                df_combinado = pd.merge(df_combinado, df_temp, on='ds', how='outer')
+                print("  No hay predicciones válidas para la validación de métricas del ensamble (todos los arrays son None o vacíos).")
+        else:
+            print("  No hay suficientes muestras para el conjunto de validación de métricas del ensamble.")
+    else:
+        print("  No hay suficientes datos históricos para crear secuencias para la validación de métricas del ensamble.")
 
-    df_combinado = df_combinado.set_index('ds').sort_index().ffill().bfill()
-    df_combinado['Demanda_Total_Global'] = df_combinado.sum(axis=1)
+    # Imprimir tabla de métricas de validación del ensamble si se calcularon
+    if 'combinado_val' in metricas_todos_modelos and metricas_todos_modelos['combinado_val']:
+        print("\n" + "="*20 + " MÉTRICAS ENSAMBLE (VALIDACIÓN HISTÓRICA) " + "="*20)
+        metric_table_data_ens_val_print = {'Métrica': ['RMSE', 'MAE', 'R2', 'MAPE']}
+        metrics_ens_val_actual = metricas_todos_modelos.get('combinado_val',{}) # Usar .get para seguridad
+        metric_table_data_ens_val_print['ENSAMBLE_VAL'] = [metrics_ens_val_actual.get(m,np.nan) for m in ['RMSE', 'MAE', 'R2', 'MAPE']]
+        print(pd.DataFrame(metric_table_data_ens_val_print).to_string(index=False, float_format='%.4f'))
+        print("="*70)
+    else:
+        print("\nNo se calcularon métricas de validación para el ensamble.")
 
-    # 2. Guardar la serie de Demanda Total Global Mensual
-    ruta_mensual = 'predicciones/demanda_total_global_mensual.csv'
-    df_combinado.to_csv(ruta_mensual)
-    print(f"\nSerie de demanda total mensual guardada en: {ruta_mensual}")
+    # Guardar modelos finales
+    modelos_para_guardar = {'prophet': modelo_prophet}
+    if mejor_modelo_gru_info and 'model' in mejor_modelo_gru_info:
+        modelos_para_guardar['gru'] = mejor_modelo_gru_info['model']
+    if mejor_modelo_wavenet_info and 'model' in mejor_modelo_wavenet_info:
+        modelos_para_guardar['wavenet'] = mejor_modelo_wavenet_info['model']
+    if mejor_modelo_gbr_info and 'model' in mejor_modelo_gbr_info:
+        modelos_para_guardar['gbr'] = mejor_modelo_gbr_info['model']
 
-    # 3. Gráfico de Áreas Apiladas Mensual
-    print("Generando gráfico de áreas apiladas mensual...")
-    plt.figure(figsize=(18, 10))
-    # Usamos los nombres de columna originales para el apilado
-    cols_a_graficar = list(resultados_por_columna.keys())
-    plt.stackplot(df_combinado.index, [df_combinado[col] for col in cols_a_graficar], labels=cols_a_graficar, alpha=0.8)
-    plt.plot(df_combinado.index, df_combinado['Demanda_Total_Global'], color='black', linestyle='--', linewidth=2, label='Demanda Total Global')
-    plt.title('Evolución del Consumo de Energía Mensual (Modelo Combinado)', fontsize=16)
-    plt.ylabel('Consumo de Energía (MWh)')
-    plt.xlabel('Fecha')
-    plt.legend(loc='upper left')
-    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
-    plt.tight_layout()
-    plt.show()
+    # Preparar métricas finales para guardar con el ensamble
+    # `metricas_todos_modelos` ya contiene las de ajuste individuales y 'combinado_val' si se calculó
+    final_metrics_for_ensemble_save = metricas_todos_modelos.copy()
+    if 'combinado_val' in final_metrics_for_ensemble_save and final_metrics_for_ensemble_save['combinado_val']:
+         # Usar 'combinado_val' como las métricas principales del ensamble si están disponibles
+         final_metrics_for_ensemble_save['combinado'] = final_metrics_for_ensemble_save['combinado_val']
+    elif pesos_ensamble_final and 'prophet' in final_metrics_for_ensemble_save and final_metrics_for_ensemble_save['prophet']:
+         # Fallback: si no hay métricas de validación del ensamble pero hay pesos y Prophet tiene métricas, usar Prophet
+         print("  ADVERTENCIA: Usando métricas de Prophet como placeholder para métricas del ensamble 'combinado' (validación del ensamble falló).")
+         final_metrics_for_ensemble_save['combinado'] = final_metrics_for_ensemble_save.get('prophet',{})
+    else: # Si nada está disponible, 'combinado' será un dict vacío.
+        print("  ADVERTENCIA: No hay métricas de validación del ensamble ni de Prophet disponibles para 'combinado'.")
+        final_metrics_for_ensemble_save['combinado'] = {}
 
-    # 4. Procesamiento Anual y Tasa de Crecimiento (YoY)
-    print("\nProcesando datos anuales y calculando tasa de crecimiento...")
-    df_anual = df_combinado.resample('A').sum()
-    df_anual['YoY_Crecimiento'] = df_anual['Demanda_Total_Global'].pct_change() * 100
+    if forecast_combinado_futuro is not None and not forecast_combinado_futuro.empty:
+        ruta_ensamblado_guardado = guardar_modelo_ensamblado(
+            modelos_para_guardar,
+            forecast_combinado_futuro,
+            final_metrics_for_ensemble_save, # Pasa el diccionario completo con todas las métricas
+            pesos_ensamble_final,
+            id_datos
+        )
+        if ruta_ensamblado_guardado:
+            print(f"\nModelo ensamblado guardado en: {ruta_ensamblado_guardado}. Pesos: {pesos_ensamble_final}")
+        else:
+            print("\nFallo al guardar el modelo ensamblado.")
+    else:
+        print("No se pudo guardar el modelo ensamblado (sin predicciones combinadas futuras).")
 
-    # 5. Guardar la serie de Demanda Total Global Anual
-    ruta_anual = 'predicciones/demanda_total_global_anual.csv'
-    df_anual.to_csv(ruta_anual)
-    print(f"Serie de demanda total anual guardada en: {ruta_anual}")
+    # ... (Resumen del modelo, ventajas y preparación de forecast_completo_display_ret como antes) ...
+    # Esta parte final no cambia respecto a la versión anterior que te di.
+    print("\n" + "="*70); print("RESUMEN DEL MODELO"); print("="*70)
+    print(f"ID Datos: {id_datos}, Frecuencia: {frecuencia}, Proyección: {periodos_futuros} periodos")
+    print(f"Prophet: Crecimiento={growth_type}, Regresores={len(regresores) if regresores else 0}, Eventos={eventos_especiales is not None}, Cambios Estructurales={len(cambios_estructurales)}")
+    if best_params_prophet: print(f"Prophet Params: {best_params_prophet}")
+    gbr_usado_str = 'N/A'; gbm_key = 'gradient_boosting'
+    if gbm_key in modelos_avanzados_entrenados and modelos_avanzados_entrenados[gbm_key]:
+        gbr_usado_str = str(modelos_avanzados_entrenados[gbm_key].get('usar_diferenciacion', 'Desconocido'))
+    print(f"GBR usó diferenciación: {gbr_usado_str}")
+    modelos_adv_entrenados_nombres = [k for k,v in modelos_avanzados_entrenados.items() if v and 'model' in v]
+    print(f"Modelos Avanzados Entrenados: {', '.join(modelos_adv_entrenados_nombres) if modelos_adv_entrenados_nombres else 'Ninguno'}")
+    if pesos_ensamble_final: print(f"Pesos Ensamble: {pesos_ensamble_final}")
+    print("\n" + "="*70 + "\nVENTAJAS DEL ENFOQUE HÍBRIDO CON MÚLTIPLES MODELOS\n" + "="*70)
+    print("1. Robustez: Combinar modelos reduce el riesgo de depender de uno solo."); print("2. Captura de Patrones Diversos: Cada modelo es bueno en diferentes aspectos."); print("   - Prophet: Tendencias, estacionalidades (anual, semanal, diaria), eventos especiales, outliers (parcial)."); print("   - GRU/WaveNet: Patrones secuenciales complejos y no lineales, dependencias temporales, mejor con features explícitas de cambio."); print("   - GBR: Interacciones no lineales, puede ser robusto a outliers, bueno con features de cambio y diferenciación."); print("3. Mejora Potencial de Precisión: El ensamble a menudo supera a los modelos individuales."); print("4. Aprendizaje Continuo: El sistema está diseñado para mejorar con nuevos datos."); print("5. Flexibilidad: Se adapta a diferentes frecuencias de datos (mensual, diario, horario)."); print("6. Manejo de Outliers: Se ha añadido un paso explícito para tratar valores atípicos."); print("7. Uso de Changepoints: Los cambios estructurales se pueden usar como features en todos los modelos."); print("="*70 + f"\n\n¡Proceso completado! Proyecciones para {periodos_futuros} periodos.")
+    df_hist_energia_ret = df_original_tratada[['Date','Energía']].copy(); df_hist_energia_ret.columns=['ds','yhat']; df_hist_energia_ret['tipo']='histórico'
+    for mk_ret_hist in ['prophet','rnn','avanzado','gbr']: df_hist_energia_ret[f'yhat_{mk_ret_hist}'] = df_hist_energia_ret['yhat']
+    forecast_completo_display_ret = df_hist_energia_ret.copy()
+    if forecast_combinado_futuro is not None and not forecast_combinado_futuro.empty:
+        fc_fut_ret_val = forecast_combinado_futuro.copy()
+        if 'tipo' not in fc_fut_ret_val.columns : fc_fut_ret_val['tipo'] = 'proyección'
+        for mk_ret_fut_val in ['prophet','rnn','avanzado','gbr']:
+            if f'yhat_{mk_ret_fut_val}' not in fc_fut_ret_val.columns: fc_fut_ret_val[f'yhat_{mk_ret_fut_val}'] = np.nan
+        all_cols_ret_val = list(set(forecast_completo_display_ret.columns) | set(fc_fut_ret_val.columns))
+        for df_part_ret in [forecast_completo_display_ret, fc_fut_ret_val]:
+            for col_ret_val in all_cols_ret_val:
+                if col_ret_val not in df_part_ret.columns: df_part_ret[col_ret_val] = np.nan
+        forecast_completo_display_ret = pd.concat([forecast_completo_display_ret[all_cols_ret_val], fc_fut_ret_val[all_cols_ret_val]], ignore_index=True).sort_values('ds')
+    else: print("Advertencia: No hay proyecciones combinadas futuras para el DataFrame de retorno.")
 
-    # 6. Gráfico de Áreas Apiladas Anual con YoY
-    print("Generando gráfico de áreas apiladas anual con tasa de crecimiento...")
-    fig, ax1 = plt.subplots(figsize=(18, 10))
+    return forecast_completo_display_ret, ruta_exportacion
 
-    # Gráfico de áreas apiladas
-    ax1.stackplot(df_anual.index, [df_anual[col] for col in cols_a_graficar], labels=cols_a_graficar, alpha=0.8)
-    ax1.set_title('Evolución Anual del Consumo y Tasa de Crecimiento (YoY)', fontsize=16)
-    ax1.set_ylabel('Consumo de Energía Anual (MWh)')
-    ax1.set_xlabel('Año')
-    ax1.legend(loc='upper left')
-    ax1.grid(True, which='both', linestyle='--', linewidth=0.5)
-
-    # Eje secundario para la tasa de crecimiento YoY
-    ax2 = ax1.twinx()
-    ax2.plot(df_anual.index, df_anual['YoY_Crecimiento'], color='red', marker='o', linestyle='--', label='Crecimiento YoY (%)')
-    ax2.set_ylabel('Tasa de Crecimiento Anual (%)', color='red')
-    ax2.tick_params(axis='y', labelcolor='red')
-    ax2.axhline(0, color='red', lw=0.5, ls='--')
-    ax2.legend(loc='upper right')
-
-    fig.tight_layout()
-    plt.show()
-
+# ==============================================================================
+# 8. EXECUTION BLOCK
+# ==============================================================================
 
 if __name__ == "__main__":
-    main()
+    # Example: If running in Colab and need to mount Drive, uncomment:
+    # try:
+    #     from google.colab import drive
+    #     drive.mount('/content/drive', force_remount=True)
+    # except ImportError:
+    #     print("Not in Colab or google.colab not available. Skipping Drive mount.")
+
+    final_forecast_df, exported_file_path = main_avanzado()
+
+    if final_forecast_df is not None:
+        print("\nÚltimas 5 filas del DataFrame de pronóstico final (histórico + combinado):")
+        print(final_forecast_df.tail())
+    if exported_file_path:
+        print(f"\nArchivo de exportación: {exported_file_path}")
