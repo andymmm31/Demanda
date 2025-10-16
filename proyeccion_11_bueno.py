@@ -2242,6 +2242,11 @@ def entrenar_modelos_avanzados_continuo(df, modelo_gru_anterior=None, modelo_wav
             models_progress.update(1)
             continue
 
+        full_metrics = {}
+        if y_val_plot_real_desnorm_target is not None and y_val_plot_pred_desnorm is not None:
+            full_metrics = calcular_metricas_modelo(y_val_plot_real_desnorm_target, y_val_plot_pred_desnorm)
+            print(f"Métricas de validación desescaladas para {tipo_modelo}: {full_metrics}")
+
         if model and current_scaler_plot_info:
             modelos_entrenados[tipo_modelo] = {
                 'model': model,
@@ -2251,6 +2256,7 @@ def entrenar_modelos_avanzados_continuo(df, modelo_gru_anterior=None, modelo_wav
                 'scaler_target_idx': current_scaler_plot_info['target_idx'],
                 'time_steps': time_steps_calculado,
                 'val_loss': val_loss,
+                'metrics': full_metrics,
                 'usar_diferenciacion': gbr_target_is_diff if tipo_modelo == 'gradient_boosting' else False,
                 'feature_names_input': feature_names_rnn if tipo_modelo != 'gradient_boosting' else (gbr_feature_names_constructed if gbr_feature_names_constructed else None)
             }
@@ -2808,9 +2814,11 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, par
     )
 
     metricas_todos_modelos = {'prophet': metricas_prophet if metricas_prophet else {}}
+    model_name_map = {'gru_avanzado': 'gru', 'wavenet': 'wavenet', 'gradient_boosting': 'gbr'}
     for model_key, model_info in modelos_avanzados_entrenados.items():
-        model_name = 'gru' if 'gru' in model_key else 'wavenet' if 'wavenet' in model_key else 'gbr'
-        metricas_todos_modelos[model_name] = {'RMSE': np.sqrt(model_info.get('val_loss', np.nan))}
+        if model_key in model_name_map:
+            model_name = model_name_map[model_key]
+            metricas_todos_modelos[model_name] = model_info.get('metrics', {})
 
     print("\n" + "="*20 + f" MÉTRICAS DE AJUSTE PARA {columna_energia.upper()} (SOBRE VALIDACIÓN) " + "="*20)
     metric_table_data = {'Métrica': ['RMSE', 'MAE', 'R2', 'MAPE']}
@@ -2890,11 +2898,14 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, par
             y_true_val = df_original_tratada[columna_energia].values[-val_samples:]
             fechas_val = df_original_tratada['Date'].values[-val_samples:]
 
+            # Corregido: Usar las predicciones de validación desescaladas que ya tenemos
             preds_p_val = forecast_prophet[forecast_prophet['ds'].isin(fechas_val)] if forecast_prophet is not None else None
-            preds_g_val = validation_predictions.get('gru_avanzado')[-val_samples:] if validation_predictions.get('gru_avanzado') is not None else None
-            preds_w_val = validation_predictions.get('wavenet')[-val_samples:] if validation_predictions.get('wavenet') is not None else None
-            preds_b_val = validation_predictions.get('gradient_boosting')[-val_samples:] if validation_predictions.get('gradient_boosting') is not None else None
+            # Asegurarse de que el slicing es correcto y maneja longitudes desiguales
+            preds_g_val = validation_predictions.get('gru_avanzado')
+            preds_w_val = validation_predictions.get('wavenet')
+            preds_b_val = validation_predictions.get('gradient_boosting')
 
+            # Crear el ensamble con las predicciones de validación
             ensamble_val = crear_ensamble_mixto(preds_p_val, preds_g_val, preds_w_val, preds_b_val, fechas_val, pesos_ensamble_final)
             if ensamble_val is not None and not ensamble_val.empty:
                 metricas_ensamble = calcular_metricas_modelo(y_true_val, ensamble_val['yhat'].values)
