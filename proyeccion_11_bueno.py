@@ -75,8 +75,6 @@ from tensorflow.keras import backend as K
 from tqdm.notebook import tqdm
 from tqdm import tqdm as tqdm_cli
 
-# TensorFlow and Keras
-
 # Suppress warnings
 warnings.filterwarnings('ignore')
 
@@ -2608,6 +2606,33 @@ def visualizar_energia_potencia(forecast_combinado, df_original=None, incluir_mo
 # 7. MAIN APPLICATION LOGIC
 # ==============================================================================
 
+def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia):
+    """
+    Ejecuta el pipeline completo de análisis y pronóstico para una columna de energía específica.
+
+    Args:
+        df_original (pd.DataFrame): El DataFrame completo con todos los datos.
+        columna_energia (str): El nombre de la columna a analizar y predecir.
+        frecuencia (str): La frecuencia detectada de los datos ('mensual', 'diario', etc.).
+
+    Returns:
+        tuple: Un tuple con el DataFrame de pronóstico y la ruta del archivo exportado.
+    """
+    print("\n" + "="*70)
+    print(f"INICIANDO ANÁLISIS PARA: {columna_energia.upper()}")
+    print("="*70)
+
+    # El id_datos ahora será específico para cada columna
+    id_datos_col = f"{hash(columna_energia)}_{str(abs(hash(tuple(df_original[columna_energia].values))))[:10])}"
+
+    print(f"\nTRATANDO VALORES ATÍPICOS (OUTLIERS) PARA '{columna_energia}'")
+    print("------------------------------------")
+    df_original_tratada = detectar_y_tratar_outliers(df_original.copy(),
+                                                     columna_energia=columna_energia,
+                                                     metodo='iqr',
+                                                     estrategia_tratamiento='cap')
+
+    num_periodos_sug = obtener_periodos_sugeridos(frecuencia)
     periodos_in = input(f"\n¿Cuántos periodos desea proyectar para todas las categorías? (sugerido: {num_periodos_sug}): ")
     try:
         periodos_futuros = int(periodos_in) if periodos_in.strip() else num_periodos_sug
@@ -2849,7 +2874,7 @@ def visualizar_energia_potencia(forecast_combinado, df_original=None, incluir_mo
     if 'gradient_boosting' in modelos_avanzados_entrenados: modelos_para_guardar['gbr'] = modelos_avanzados_entrenados['gradient_boosting']['model']
 
     if forecast_combinado_futuro is not None and not forecast_combinado_futuro.empty:
-        guardar_modelo_ensamblado(modelos_para_guardar, forecast_combinado_futuro, metricas_todos_modelos, pesos_ensamble_final, id_datos_col)
+        guardar_modelo_ensamblado(modelos_para_guardar, forecast_combinado_futuro, metricas_todos_modelos, pesos_ensamble_final, id_datos_col, columna_energia=columna_energia)
 
     print("\n" + "="*70 + f"\n¡Proceso para {columna_energia.upper()} completado!\n" + "="*70)
     return forecast_combinado_futuro, ruta_exportacion
@@ -2860,7 +2885,8 @@ def visualizar_energia_potencia(forecast_combinado, df_original=None, incluir_mo
 # ==============================================================================
 def main():
     """
-    Función principal que carga los datos y ejecuta el análisis para cada columna de energía.
+    Función principal que carga los datos, ejecuta el análisis para cada columna de energía,
+    y luego realiza un análisis agregado de los resultados.
     """
     print("\n" + "="*70 + "\nSISTEMA DE PRONÓSTICO DE ENERGÍA MULTI-CATEGORÍA\n" + "="*70)
     print("\n1. CARGANDO DATOS\n-----------------")
@@ -2870,32 +2896,105 @@ def main():
         return
 
     columnas_energia_a_procesar = ['residencial', 'comercial', 'industrial', 'otros', 'alumbrado publico']
+    resultados_agregados = {}
 
     for columna in columnas_energia_a_procesar:
         if columna in df_original.columns:
-            ejecutar_analisis_para_columna(df_original, columna, frecuencia)
+            forecast_df, _ = ejecutar_analisis_para_columna(df_original, columna, frecuencia)
+            resultados_agregados[columna] = forecast_df
         else:
             print(f"\nADVERTENCIA: La columna '{columna}' no se encontró en el archivo. Saltando su análisis.")
 
+    # Después de procesar todas las columnas, ejecutar el análisis agregado
+    if resultados_agregados:
+        analizar_y_visualizar_agregado(resultados_agregados)
+
+def analizar_y_visualizar_agregado(resultados_por_columna):
+    """
+    Toma los resultados de pronóstico de múltiples columnas de energía,
+    los combina y genera visualizaciones y análisis agregados.
+
+    Args:
+        resultados_por_columna (dict): Un diccionario donde las claves son los
+                                       nombres de las columnas de energía y los
+                                       valores son los DataFrames de pronóstico
+                                       combinado para cada columna.
+    """
+    print("\n" + "="*70)
+    print("INICIANDO ANÁLISIS AGREGADO DE TODAS LAS CATEGORÍAS")
+    print("="*70)
+
+    if not resultados_por_columna:
+        print("No se proporcionaron resultados para el análisis agregado. Saltando.")
+        return
+
+    # 1. Combinar todos los resultados en un único DataFrame
+    df_combinado = pd.DataFrame()
+    for col_energia, df_forecast in resultados_por_columna.items():
+        if df_forecast is not None and not df_forecast.empty:
+            df_temp = df_forecast[['ds', 'yhat']].copy()
+            df_temp = df_temp.rename(columns={'yhat': col_energia})
+            if df_combinado.empty:
+                df_combinado = df_temp
+            else:
+                df_combinado = pd.merge(df_combinado, df_temp, on='ds', how='outer')
+
+    df_combinado = df_combinado.set_index('ds').sort_index().ffill().bfill()
+    df_combinado['Demanda_Total_Global'] = df_combinado.sum(axis=1)
+
+    # 2. Guardar la serie de Demanda Total Global Mensual
+    ruta_mensual = 'predicciones/demanda_total_global_mensual.csv'
+    df_combinado.to_csv(ruta_mensual)
+    print(f"\nSerie de demanda total mensual guardada en: {ruta_mensual}")
+
+    # 3. Gráfico de Áreas Apiladas Mensual
+    print("Generando gráfico de áreas apiladas mensual...")
+    plt.figure(figsize=(18, 10))
+    # Usamos los nombres de columna originales para el apilado
+    cols_a_graficar = list(resultados_por_columna.keys())
+    plt.stackplot(df_combinado.index, [df_combinado[col] for col in cols_a_graficar], labels=cols_a_graficar, alpha=0.8)
+    plt.plot(df_combinado.index, df_combinado['Demanda_Total_Global'], color='black', linestyle='--', linewidth=2, label='Demanda Total Global')
+    plt.title('Evolución del Consumo de Energía Mensual (Modelo Combinado)', fontsize=16)
+    plt.ylabel('Consumo de Energía (MWh)')
+    plt.xlabel('Fecha')
+    plt.legend(loc='upper left')
+    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+    plt.tight_layout()
+    plt.show()
+
+    # 4. Procesamiento Anual y Tasa de Crecimiento (YoY)
+    print("\nProcesando datos anuales y calculando tasa de crecimiento...")
+    df_anual = df_combinado.resample('A').sum()
+    df_anual['YoY_Crecimiento'] = df_anual['Demanda_Total_Global'].pct_change() * 100
+
+    # 5. Guardar la serie de Demanda Total Global Anual
+    ruta_anual = 'predicciones/demanda_total_global_anual.csv'
+    df_anual.to_csv(ruta_anual)
+    print(f"Serie de demanda total anual guardada en: {ruta_anual}")
+
+    # 6. Gráfico de Áreas Apiladas Anual con YoY
+    print("Generando gráfico de áreas apiladas anual con tasa de crecimiento...")
+    fig, ax1 = plt.subplots(figsize=(18, 10))
+
+    # Gráfico de áreas apiladas
+    ax1.stackplot(df_anual.index, [df_anual[col] for col in cols_a_graficar], labels=cols_a_graficar, alpha=0.8)
+    ax1.set_title('Evolución Anual del Consumo y Tasa de Crecimiento (YoY)', fontsize=16)
+    ax1.set_ylabel('Consumo de Energía Anual (MWh)')
+    ax1.set_xlabel('Año')
+    ax1.legend(loc='upper left')
+    ax1.grid(True, which='both', linestyle='--', linewidth=0.5)
+
+    # Eje secundario para la tasa de crecimiento YoY
+    ax2 = ax1.twinx()
+    ax2.plot(df_anual.index, df_anual['YoY_Crecimiento'], color='red', marker='o', linestyle='--', label='Crecimiento YoY (%)')
+    ax2.set_ylabel('Tasa de Crecimiento Anual (%)', color='red')
+    ax2.tick_params(axis='y', labelcolor='red')
+    ax2.axhline(0, color='red', lw=0.5, ls='--')
+    ax2.legend(loc='upper right')
+
+    fig.tight_layout()
+    plt.show()
+
+
 if __name__ == "__main__":
     main()
-
-# ==============================================================================
-# 8. EXECUTION BLOCK
-# ==============================================================================
-
-if __name__ == "__main__":
-    # Example: If running in Colab and need to mount Drive, uncomment:
-    # try:
-    #     from google.colab import drive
-    #     drive.mount('/content/drive', force_remount=True)
-    # except ImportError:
-    #     print("Not in Colab or google.colab not available. Skipping Drive mount.")
-
-    final_forecast_df, exported_file_path = main_avanzado()
-
-    if final_forecast_df is not None:
-        print("\nÚltimas 5 filas del DataFrame de pronóstico final (histórico + combinado):")
-        print(final_forecast_df.tail())
-    if exported_file_path:
-        print(f"\nArchivo de exportación: {exported_file_path}")
