@@ -1090,6 +1090,37 @@ def entrenar_modelo_prophet(df, regresores=None, growth_type='logistic', eventos
                 future[r_name] = future['ds'].map(lambda x: last_val if x > df['ds'].max() else (df.loc[df['ds'] == x, r_name].iloc[0] if x in df['ds'].values else np.nan))
                 future[r_name] = future[r_name].interpolate(method='linear').fillna(last_val)
     forecast = model.predict(future)
+
+    # Aplanamiento de tendencia negativa para crecimiento lineal
+    if growth_type == 'linear':
+        try:
+            # Identificar la última fecha histórica en el forecast
+            last_hist_date = df['ds'].max()
+            historical_fc = forecast[forecast['ds'] <= last_hist_date]
+
+            # Calcular la pendiente de la tendencia reciente en el período histórico
+            if len(historical_fc) > 12:
+                recent_trend = historical_fc['trend'].iloc[-12:]
+                slope = (recent_trend.iloc[-1] - recent_trend.iloc[0]) / len(recent_trend)
+
+                if slope < 0:
+                    print(f"  Advertencia: Se detectó una pendiente de tendencia reciente negativa ({slope:.4f}).")
+                    print("  Aplanando la tendencia futura para evitar proyecciones poco realistas.")
+
+                    future_idx = forecast['ds'] > last_hist_date
+                    last_trend_value = historical_fc['trend'].iloc[-1]
+
+                    # Calcular el ajuste necesario y aplicarlo
+                    trend_adjustment = last_trend_value - forecast.loc[future_idx, 'trend']
+
+                    forecast.loc[future_idx, 'trend'] = last_trend_value
+                    for col in ['yhat', 'yhat_lower', 'yhat_upper']:
+                        if col in forecast.columns:
+                            forecast.loc[future_idx, col] = forecast.loc[future_idx, col] + trend_adjustment
+        except Exception as e:
+            print(f"  No se pudo aplicar el aplanamiento de tendencia: {e}")
+
+
     if ajuste_adicional:
         print("Aplicando ajustes adicionales...");
         p_adj = 12 if frecuencia == 'mensual' else 30 if frecuencia == 'diario' else 24*7 if frecuencia in ['horario', 'sub-horario'] else max(1, len(df) // 10)
