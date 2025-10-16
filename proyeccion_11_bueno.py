@@ -2623,7 +2623,7 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia):
     print("="*70)
 
     # El id_datos ahora será específico para cada columna
-    id_datos_col = f"{hash(columna_energia)}_{str(abs(hash(tuple(df_original[columna_energia].values))))[:10])}"
+    id_datos_col = f"{hash(columna_energia)}_{str(abs(hash(tuple(df_original[columna_energia].values))))[:10]}"
 
     print(f"\nTRATANDO VALORES ATÍPICOS (OUTLIERS) PARA '{columna_energia}'")
     print("------------------------------------")
