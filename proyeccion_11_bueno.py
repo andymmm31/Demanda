@@ -2713,6 +2713,10 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, par
     print("------------------------")
     analisis_estadistico_energia(df_original_tratada, columna_energia=columna_energia, frecuencia=frecuencia)
 
+    print("\n6. DEFINIENDO EVENTOS ESPECIALES")
+    print("------------------------------")
+    eventos_especiales = definir_eventos_especiales(frecuencia)
+
     print("\n4. ANALIZANDO CORRELACIONES")
     print("-------------------------")
     visualizar_matriz_correlacion_no_lineal(df_original_tratada, metodo='spearman')
@@ -2964,8 +2968,6 @@ def main():
         periodos_futuros = num_periodos_sug
     print(f"Se proyectarán {periodos_futuros} periodos ({traducir_periodos_a_texto(periodos_futuros, frecuencia)}) para cada categoría.")
 
-    eventos_especiales = definir_eventos_especiales(frecuencia)
-
     growth_input = input(f"Tipo de crecimiento para Prophet (linear/logistic) [sugerido: logistic]: ").lower()
     growth_type = growth_input if growth_input in ['linear', 'logistic'] else 'logistic'
 
@@ -2985,7 +2987,6 @@ def main():
     params_ejecucion = {
         'periodos_futuros': periodos_futuros,
         'preguntar_cargar_modelos': False, # No preguntar en cada iteración
-        'eventos_especiales': eventos_especiales,
         'growth_type': growth_type,
         'ajuste_adicional_prophet': ajuste_adicional_prophet,
         'usar_diferenciacion_gbr': usar_diferenciacion_gbr,
