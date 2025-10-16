@@ -1373,10 +1373,28 @@ def entrenar_modelo_prophet_continuo(df, modelo_anterior=None, regresores=None, 
     if regresores:
         for r_name in regresores:
             if r_name in df.columns:
-                p_avg = 12 if frecuencia == 'mensual' else 30 if frecuencia == 'diario' else 24*7 if frecuencia in ['horario', 'sub-horario'] else max(1, len(df) // 10)
-                last_val = df[r_name].rolling(window=p_avg).mean().iloc[-1] if len(df) >= p_avg else df[r_name].mean()
-                future[r_name] = future['ds'].map(lambda x: last_val if x > df['ds'].max() else (df.loc[df['ds'] == x, r_name].iloc[0] if x in df['ds'].values else np.nan))
-                future[r_name] = future[r_name].interpolate(method='linear').fillna(last_val)
+                # Usar los últimos 12 puntos para la tendencia, o menos si no hay suficientes datos
+                puntos_tendencia = min(12, len(df))
+                ultimos_puntos = df.tail(puntos_tendencia)
+
+                # Crear un modelo lineal simple para el regresor
+                from sklearn.linear_model import LinearRegression
+                X_trend = np.arange(len(ultimos_puntos)).reshape(-1, 1)
+                y_trend = ultimos_puntos[r_name].values
+
+                trend_model = LinearRegression()
+                trend_model.fit(X_trend, y_trend)
+
+                # Crear los puntos futuros para la predicción del regresor
+                future_steps = np.arange(len(df) - puntos_tendencia, len(future) - puntos_tendencia).reshape(-1, 1)
+
+                # Predecir los valores futuros del regresor
+                future_regressor_values = trend_model.predict(future_steps)
+
+                # Asignar los valores históricos y los proyectados
+                future.loc[:len(df)-1, r_name] = df[r_name].values
+                future.loc[len(df):, r_name] = future_regressor_values[puntos_tendencia:]
+
     forecast = model.predict(future)
     if ajuste_adicional:
         print("Aplicando ajustes adicionales...")
