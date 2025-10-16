@@ -1043,6 +1043,112 @@ def guardar_modelo_ensamblado(modelos, forecast_combinado, metricas_modelos, pes
 # 4. PROPHET MODEL FUNCTIONS
 # ==============================================================================
 
+def encontrar_mejor_prophet_lineal(df_prophet, regresores=None, eventos=None, periodos_futuros=120, frecuencia='mensual'):
+    """
+    Encuentra el mejor modelo Prophet con crecimiento lineal iterando sobre
+    changepoint_prior_scale para evitar tendencias negativas irreales.
+
+    Args:
+        df_prophet (pd.DataFrame): DataFrame con columnas 'ds' y 'y'.
+        regresores (list): Lista de regresores para el modelo.
+        eventos (pd.DataFrame): DataFrame con eventos especiales.
+        periodos_futuros (int): Número de períodos a predecir en el futuro.
+        frecuencia (str): Frecuencia de los datos ('mensual', 'diario', etc.).
+
+    Returns:
+        tuple: (mejor_modelo, mejor_forecast, mejores_metricas, mejores_parametros)
+    """
+    print("\nBuscando el mejor modelo lineal para evitar tendencias negativas...")
+    prior_scales = [0.5, 0.1, 0.05, 0.01, 0.005, 0.001]
+    resultados_validos = []
+    freq_prophet = obtener_freq_prophet(frecuencia)
+
+    pbar = get_progress_bar(total=len(prior_scales), desc="Buscando Prophet lineal óptimo")
+
+    for scale in prior_scales:
+        pbar.set_description(f"Probando scale: {scale}")
+        try:
+            # 1. Configurar y entrenar el modelo
+            params = {'changepoint_prior_scale': scale}
+            model = Prophet(
+                growth='linear',
+                changepoint_prior_scale=scale,
+                seasonality_mode='additive',
+                daily_seasonality=frecuencia in ['horario', 'sub-horario', 'diario', 'sub-diario'],
+                weekly_seasonality=frecuencia in ['diario', 'sub-diario']
+            )
+            if regresores:
+                for r in regresores:
+                    if r in df_prophet.columns: model.add_regressor(r)
+            if frecuencia == 'mensual': model.add_seasonality(name='yearly', period=365.25, fourier_order=10)
+            if eventos is not None: model.holidays = eventos
+
+            model.fit(df_prophet)
+
+            # 2. Hacer una predicción (histórica y futura)
+            future_df = model.make_future_dataframe(periods=periodos_futuros, freq=freq_prophet)
+            if regresores:
+                for r_name in regresores:
+                    if r_name in df_prophet.columns:
+                        last_val = df_prophet[r_name].mean()
+                        future_df[r_name] = future_df['ds'].map(lambda x: last_val if x > df_prophet['ds'].max() else (df_prophet.loc[df_prophet['ds'] == x, r_name].iloc[0] if x in df_prophet['ds'].values else np.nan))
+                        future_df[r_name] = future_df[r_name].interpolate(method='linear').fillna(last_val)
+
+            forecast = model.predict(future_df)
+
+            # 3. Validar la tendencia futura
+            last_hist_date = df_prophet['ds'].max()
+            future_idx = forecast['ds'] > last_hist_date
+            trend_futura = forecast.loc[future_idx, 'trend']
+
+            if not trend_futura.empty and trend_futura.iloc[-1] >= trend_futura.iloc[0]:
+                print(f"  [VÁLIDO] Scale {scale}: La tendencia no es negativa.")
+                # Calcular métricas solo sobre el ajuste histórico
+                forecast_train = forecast[forecast['ds'] <= last_hist_date]
+                y_true = df_prophet['y']
+                y_pred = forecast_train['yhat']
+                metricas = calcular_metricas_modelo(y_true, y_pred)
+                print(f"  Error (MAE): {metricas['MAE']:.2f}")
+                resultados_validos.append({
+                    'scale': scale,
+                    'mae': metricas['MAE'],
+                    'metricas': metricas,
+                    'modelo': model,
+                    'forecast': forecast,
+                    'params': params
+                })
+            else:
+                print(f"  [INVÁLIDO] Scale {scale}: La tendencia es negativa. Descartado.")
+
+        except Exception as e:
+            print(f"Error probando scale {scale}: {e}")
+        pbar.update(1)
+    pbar.close()
+
+    if not resultados_validos:
+        print("\nAdvertencia: No se encontró ningún modelo lineal con tendencia no negativa. "
+              "Se devolverá el último modelo probado, que podría tener una tendencia a la baja.")
+        # Fallback: devolver el último modelo que se intentó entrenar, si existe
+        if 'model' in locals() and 'forecast' in locals():
+             forecast_train = forecast[forecast['ds'] <= df_prophet['ds'].max()]
+             metricas = calcular_metricas_modelo(df_prophet['y'], forecast_train['yhat'])
+             return model, forecast, metricas, params
+        else: # No se pudo entrenar ningún modelo
+             return None, None, None, None
+
+    # Seleccionar el mejor modelo de los válidos (menor MAE)
+    mejor_resultado = min(resultados_validos, key=lambda x: x['mae'])
+    print(f"\nMejor modelo lineal encontrado con changepoint_prior_scale = {mejor_resultado['scale']:.4f} (MAE: {mejor_resultado['mae']:.2f})")
+
+    # Visualizar el mejor
+    mejor_modelo = mejor_resultado['modelo']
+    mejor_forecast = mejor_resultado['forecast']
+    mejor_modelo.plot(mejor_forecast, uncertainty=True); plt.title(f'Mejor Pronóstico Lineal (scale={mejor_resultado["scale"]})'); plt.ylabel('Energía'); plt.grid(True); plt.tight_layout(); plt.show()
+    mejor_modelo.plot_components(mejor_forecast); plt.tight_layout(); plt.show()
+
+    return mejor_resultado['modelo'], mejor_resultado['forecast'], mejor_resultado['metricas'], mejor_resultado['params']
+
+
 def entrenar_modelo_prophet(df, regresores=None, growth_type='logistic', eventos=None, params=None,
                          periodos_futuros=120, vis_componentes=True, ajuste_adicional=True, frecuencia='mensual'):
     """
@@ -2801,26 +2907,42 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, par
 
     ajuste_adicional = params_ejecucion['ajuste_adicional_prophet']
 
-    print("\n11. OPTIMIZANDO HIPERPARÁMETROS (PROPHET)")
-    print("---------------------------------------")
-    best_params_prophet = None
-    if mejor_modelo_anterior_prophet and 'parametros' in mejor_modelo_anterior_prophet and mejor_modelo_anterior_prophet['parametros']:
-        param_grid_refinado = refinar_hiperparametros(mejor_modelo_anterior_prophet, df_original_tratada)
-        if param_grid_refinado:
-            print("Optimizando Prophet con grid refinado basado en modelo anterior...")
-            best_params_prophet, _, _ = optimizar_hiperparametros_refinados(df_prophet_con_cp, param_grid_refinado, regresores, growth_type, eventos_especiales)
-    if best_params_prophet is None:
-        print("Realizando optimización completa de hiperparámetros para Prophet...")
-        best_params_prophet, _, _ = optimizar_hiperparametros(df_prophet_con_cp, regresores, growth_type, eventos_especiales)
+    # --- Bloque de Entrenamiento de Prophet con Lógica Condicional ---
+    if growth_type == 'linear':
+        print("\n11. BUSCANDO MEJOR MODELO PROPHET LINEAL")
+        print("------------------------------------------")
+        modelo_prophet, forecast_prophet, metricas_prophet, best_params_prophet = encontrar_mejor_prophet_lineal(
+            df_prophet=df_prophet_con_cp,
+            regresores=regresores,
+            eventos=eventos_especiales,
+            periodos_futuros=periodos_futuros,
+            frecuencia=frecuencia
+        )
+        if modelo_prophet is None:
+            print(f"ERROR: No se pudo entrenar un modelo Prophet lineal para {columna_energia}. Saltando al siguiente análisis.")
+            return None, None # Devolver None para indicar que el análisis de esta columna falló
 
-    print("\n12. ENTRENANDO MODELO PROPHET FINAL")
-    print("---------------------------------")
-    modelo_prophet, forecast_prophet, metricas_prophet = entrenar_modelo_prophet_continuo(
-        df_prophet_con_cp, modelo_anterior=modelos_anteriores.get('prophet_model'),
-        regresores=regresores, growth_type=growth_type, eventos=eventos_especiales,
-        params=best_params_prophet, periodos_futuros=periodos_futuros,
-        ajuste_adicional=ajuste_adicional, frecuencia=frecuencia
-    )
+    else: # 'logistic'
+        print("\n11. OPTIMIZANDO HIPERPARÁMETROS (PROPHET LOGISTIC)")
+        print("-------------------------------------------------")
+        best_params_prophet = None
+        if mejor_modelo_anterior_prophet and 'parametros' in mejor_modelo_anterior_prophet and mejor_modelo_anterior_prophet['parametros']:
+            param_grid_refinado = refinar_hiperparametros(mejor_modelo_anterior_prophet, df_original_tratada)
+            if param_grid_refinado:
+                print("Optimizando Prophet con grid refinado basado en modelo anterior...")
+                best_params_prophet, _, _ = optimizar_hiperparametros_refinados(df_prophet_con_cp, param_grid_refinado, regresores, growth_type, eventos_especiales)
+        if best_params_prophet is None:
+            print("Realizando optimización completa de hiperparámetros para Prophet...")
+            best_params_prophet, _, _ = optimizar_hiperparametros(df_prophet_con_cp, regresores, growth_type, eventos_especiales)
+
+        print("\n12. ENTRENANDO MODELO PROPHET FINAL (LOGISTIC)")
+        print("---------------------------------------------")
+        modelo_prophet, forecast_prophet, metricas_prophet = entrenar_modelo_prophet_continuo(
+            df_prophet_con_cp, modelo_anterior=modelos_anteriores.get('prophet_model'),
+            regresores=regresores, growth_type=growth_type, eventos=eventos_especiales,
+            params=best_params_prophet, periodos_futuros=periodos_futuros,
+            ajuste_adicional=ajuste_adicional, frecuencia=frecuencia
+        )
 
     print("\n13. ENTRENANDO MODELOS AVANZADOS (GRU, WAVENET, GBR)")
     print("--------------------------------------------------")
