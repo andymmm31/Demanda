@@ -2960,8 +2960,9 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, per
 
     print("\n13. ENTRENANDO MODELOS AVANZADOS (GRU, WAVENET, GBR)")
     print("--------------------------------------------------")
-    usar_diferenciacion_gbr_bool = params_ejecucion['usar_diferenciacion_gbr']
-    use_attention_gru_bool = params_ejecucion['usar_atencion_gru']
+    # Las variables usar_diferenciacion_gbr_bool, use_attention_gru_bool y gbr_loss_input
+    # ya se obtienen del input del usuario al inicio de esta función.
+    # Las siguientes líneas eran incorrectas y han sido eliminadas.
     mi_config_gru = {
         'gru_units': [80, 40], 'dense_units': [20], 'dropout_rate': 0.2,
         'bidirectional': True, 'use_attention': use_attention_gru_bool, 'attention_heads': 4,
@@ -2975,7 +2976,6 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, per
         'activation_conv': 'relu', 'activation_dense': 'relu',
         'optimizer_type': 'adam', 'learning_rate': 0.001, 'loss_function': 'huber'
     }
-    gbr_loss_input = params_ejecucion['gbr_loss']
     mi_config_gbr = {
         'n_estimators': 500, 'learning_rate': 0.02, 'max_depth': 5,
         'min_samples_split': 10, 'min_samples_leaf': 5, 'subsample': 0.8, 'max_features': 'sqrt',
