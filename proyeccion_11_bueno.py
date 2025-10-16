@@ -45,6 +45,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.cluster import KMeans
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.model_selection import ParameterGrid
+from sklearn.linear_model import LinearRegression
 
 # Statsmodels
 from statsmodels.tsa.stattools import adfuller
@@ -1082,14 +1083,13 @@ def entrenar_modelo_prophet(df, regresores=None, growth_type='logistic', eventos
     future = model.make_future_dataframe(periods=periodos_futuros, freq=freq_prophet)
     if growth_type == 'logistic': future['cap'] = df['cap'].max() if 'cap' in df.columns else df['y'].quantile(0.95) * 2
     if regresores:
-        for r in regresores:
-            if r in df.columns:
+        for r_name in regresores:
+            if r_name in df.columns:
                 p_avg = 12 if frecuencia == 'mensual' else 30 if frecuencia == 'diario' else 24*7 if frecuencia in ['horario', 'sub-horario'] else max(1, len(df) // 10)
-                last_val = df[r].rolling(window=p_avg).mean().iloc[-1] if len(df) >= p_avg else df[r].mean()
-                future[r] = future['ds'].map(lambda x: last_val if x > df['ds'].max() else (df.loc[df['ds'] == x, r].iloc[0] if x in df['ds'].values else np.nan))
-                future[r] = future[r].interpolate(method='linear').fillna(last_val)
+                last_val = df[r_name].rolling(window=p_avg).mean().iloc[-1] if len(df) >= p_avg else df[r_name].mean()
+                future[r_name] = future['ds'].map(lambda x: last_val if x > df['ds'].max() else (df.loc[df['ds'] == x, r_name].iloc[0] if x in df['ds'].values else np.nan))
+                future[r_name] = future[r_name].interpolate(method='linear').fillna(last_val)
     forecast = model.predict(future)
-
     if ajuste_adicional:
         print("Aplicando ajustes adicionales...");
         p_adj = 12 if frecuencia == 'mensual' else 30 if frecuencia == 'diario' else 24*7 if frecuencia in ['horario', 'sub-horario'] else max(1, len(df) // 10)
@@ -1378,7 +1378,6 @@ def entrenar_modelo_prophet_continuo(df, modelo_anterior=None, regresores=None, 
                 ultimos_puntos = df.tail(puntos_tendencia)
 
                 # Crear un modelo lineal simple para el regresor
-                from sklearn.linear_model import LinearRegression
                 X_trend = np.arange(len(ultimos_puntos)).reshape(-1, 1)
                 y_trend = ultimos_puntos[r_name].values
 
@@ -1386,14 +1385,21 @@ def entrenar_modelo_prophet_continuo(df, modelo_anterior=None, regresores=None, 
                 trend_model.fit(X_trend, y_trend)
 
                 # Crear los puntos futuros para la predicción del regresor
-                future_steps = np.arange(len(df) - puntos_tendencia, len(future) - puntos_tendencia).reshape(-1, 1)
+                # El índice comienza desde el final de los puntos de tendencia
+                future_steps = np.arange(puntos_tendencia, puntos_tendencia + periodos_futuros).reshape(-1, 1)
 
                 # Predecir los valores futuros del regresor
                 future_regressor_values = trend_model.predict(future_steps)
 
                 # Asignar los valores históricos y los proyectados
                 future.loc[:len(df)-1, r_name] = df[r_name].values
-                future.loc[len(df):, r_name] = future_regressor_values[puntos_tendencia:]
+                # Asegurarse de que la longitud de los valores coincide con la del slice del DataFrame
+                if len(future.loc[len(df):, r_name]) == len(future_regressor_values):
+                    future.loc[len(df):, r_name] = future_regressor_values
+                else:
+                    # Si hay un desajuste, usar el método de rellenado como fallback
+                    print(f"Advertencia: Desajuste de longitud en la extrapolación del regresor '{r_name}'. Usando ffill.")
+                    future[r_name] = future[r_name].ffill().bfill()
 
     forecast = model.predict(future)
     if ajuste_adicional:
