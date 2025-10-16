@@ -2811,7 +2811,7 @@ def visualizar_energia_potencia(forecast_combinado, df_original=None, incluir_mo
 # 7. MAIN APPLICATION LOGIC
 # ==============================================================================
 
-def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, params_ejecucion):
+def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, periodos_futuros, eventos_especiales, preguntar_cargar_modelos=False):
     """
     Ejecuta el pipeline completo de análisis y pronóstico para una columna de energía específica.
 
@@ -2819,7 +2819,9 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, par
         df_original (pd.DataFrame): El DataFrame completo con todos los datos.
         columna_energia (str): El nombre de la columna a analizar y predecir.
         frecuencia (str): La frecuencia detectada de los datos.
-        params_ejecucion (dict): Diccionario con parámetros definidos por el usuario.
+        periodos_futuros (int): Número de periodos a predecir.
+        eventos_especiales (pd.DataFrame): DataFrame con eventos especiales.
+        preguntar_cargar_modelos (bool): Si se debe preguntar al usuario si desea cargar modelos anteriores.
 
     Returns:
         tuple: Un tuple con el DataFrame de pronóstico y la ruta del archivo exportado.
@@ -2827,6 +2829,25 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, par
     print("\n" + "="*70)
     print(f"INICIANDO ANÁLISIS PARA: {columna_energia.upper()}")
     print("="*70)
+
+    print(f"\n--- CONFIGURACIÓN PARA '{columna_energia.upper()}' ---")
+    growth_input = input(f"Tipo de crecimiento para Prophet (linear/logistic) [sugerido: logistic]: ").lower()
+    growth_type = growth_input if growth_input in ['linear', 'logistic'] else 'logistic'
+
+    respuesta_ajuste = input("Aplicar ajustes adicionales a Prophet? (s/n, default: s): ").lower()
+    ajuste_adicional_prophet = respuesta_ajuste != 'n'
+
+    usar_diferenciacion_gbr_input = input("¿Usar diferenciación para GBR? (s/n, default: s): ").lower()
+    usar_diferenciacion_gbr_bool = usar_diferenciacion_gbr_input != 'n'
+
+    use_attention_gru_input_str = input("¿Usar atención en GRU? (s/n, default: n): ").lower()
+    use_attention_gru_bool = use_attention_gru_input_str == 's'
+
+    gbr_loss_options = ['huber', 'squared_error', 'absolute_error', 'quantile']
+    gbr_loss_input = input(f"Pérdida para GBR ({', '.join(gbr_loss_options)}, default: huber): ").lower()
+    if gbr_loss_input not in gbr_loss_options: gbr_loss_input = 'huber'
+    print("----------------------------------\n")
+
 
     # El id_datos ahora será específico para cada columna
     id_datos_col = f"{hash(columna_energia)}_{str(abs(hash(tuple(df_original[columna_energia].values))))[:10]}"
@@ -2838,23 +2859,16 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, par
                                                      metodo='iqr',
                                                      estrategia_tratamiento='cap')
 
-    periodos_futuros = params_ejecucion['periodos_futuros']
-
     print(f"\nCargando modelos anteriores para '{columna_energia}'...")
     modelos_anteriores = cargar_modelos_anteriores(id_datos_col)
 
     print(f"\n2. VERIFICANDO MODELOS ANTERIORES (PROPHET) PARA '{columna_energia}'")
     print("-----------------------------------------------------")
-    mejor_modelo_anterior_prophet = cargar_mejor_modelo_anterior(preguntar=params_ejecucion['preguntar_cargar_modelos'], id_datos=id_datos_col)
+    mejor_modelo_anterior_prophet = cargar_mejor_modelo_anterior(preguntar=preguntar_cargar_modelos, id_datos=id_datos_col)
 
-    # Solo ejecutar el análisis estadístico detallado si no es la primera columna
-    if params_ejecucion.get('primer_analisis_hecho', False) is False:
-        # Este análisis ya se hizo en main, así que solo marcamos como hecho
-        params_ejecucion['primer_analisis_hecho'] = True
-    else:
-        print(f"\n3. ANALIZANDO ESTADÍSTICAS PARA '{columna_energia}'")
-        print("------------------------")
-        analisis_estadistico_energia(df_original_tratada, columna_energia=columna_energia, frecuencia=frecuencia)
+    print(f"\n3. ANALIZANDO ESTADÍSTICAS PARA '{columna_energia}'")
+    print("------------------------")
+    analisis_estadistico_energia(df_original_tratada, columna_energia=columna_energia, frecuencia=frecuencia)
 
     print("\n4. ANALIZANDO CORRELACIONES")
     print("-------------------------")
@@ -3128,45 +3142,20 @@ def main():
 
     eventos_especiales = definir_eventos_especiales(frecuencia)
 
-    growth_input = input(f"Tipo de crecimiento para Prophet (linear/logistic) [sugerido: logistic]: ").lower()
-    growth_type = growth_input if growth_input in ['linear', 'logistic'] else 'logistic'
-
-    respuesta_ajuste = input("Aplicar ajustes adicionales a Prophet? (s/n, default: s): ").lower()
-    ajuste_adicional_prophet = respuesta_ajuste != 'n'
-
-    usar_diferenciacion_gbr_input = input("¿Usar diferenciación para GBR en todos los modelos? (s/n, default: s): ").lower()
-    usar_diferenciacion_gbr = usar_diferenciacion_gbr_input != 'n'
-
-    use_attention_gru_input_str = input("¿Usar atención en GRU para todos los modelos? (s/n, default: n): ").lower()
-    usar_atencion_gru = use_attention_gru_input_str == 's'
-
-    gbr_loss_options = ['huber', 'squared_error', 'absolute_error', 'quantile']
-    gbr_loss_input = input(f"Pérdida para GBR en todos los modelos ({', '.join(gbr_loss_options)}, default: huber): ").lower()
-    if gbr_loss_input not in gbr_loss_options: gbr_loss_input = 'huber'
-
-    params_ejecucion = {
-        'periodos_futuros': periodos_futuros,
-        'preguntar_cargar_modelos': False, # No preguntar en cada iteración
-        'eventos_especiales': eventos_especiales,
-        'primer_analisis_hecho': False, # Para controlar la visualización del gráfico
-        'growth_type': growth_type,
-        'ajuste_adicional_prophet': ajuste_adicional_prophet,
-        'usar_diferenciacion_gbr': usar_diferenciacion_gbr,
-        'usar_atencion_gru': usar_atencion_gru,
-        'gbr_loss': gbr_loss_input
-    }
-
     columnas_energia_a_procesar = ['residencial', 'comercial', 'industrial', 'otros', 'alumbrado publico']
     resultados_agregados = {}
 
     for i, columna in enumerate(columnas_energia_a_procesar):
-        if i == 0:
-            params_ejecucion['preguntar_cargar_modelos'] = True # Preguntar solo la primera vez
-        else:
-            params_ejecucion['preguntar_cargar_modelos'] = False
-
         if columna in df_original.columns:
-            forecast_df, _ = ejecutar_analisis_para_columna(df_original, columna, frecuencia, params_ejecucion)
+            # La primera vez (i=0) se preguntará si se cargan modelos, las siguientes no.
+            forecast_df, _ = ejecutar_analisis_para_columna(
+                df_original,
+                columna,
+                frecuencia,
+                periodos_futuros,
+                eventos_especiales,
+                preguntar_cargar_modelos=(i == 0)
+            )
             resultados_agregados[columna] = forecast_df
         else:
             print(f"\nADVERTENCIA: La columna '{columna}' no se encontró en el archivo. Saltando su análisis.")
