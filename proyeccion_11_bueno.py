@@ -2709,20 +2709,14 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, par
     print("-----------------------------------------------------")
     mejor_modelo_anterior_prophet = cargar_mejor_modelo_anterior(preguntar=params_ejecucion['preguntar_cargar_modelos'], id_datos=id_datos_col)
 
-    print(f"\n3. ANALIZANDO ESTADÍSTICAS PARA '{columna_energia}'")
-    print("------------------------")
-    analisis_estadistico_energia(df_original_tratada, columna_energia=columna_energia, frecuencia=frecuencia)
-
-    # --- Definición de eventos especiales (se hace aquí, después del primer gráfico) ---
-    if params_ejecucion.get('eventos_especiales') is None:
-        print("\n6. DEFINIENDO EVENTOS ESPECIALES (UNA SOLA VEZ)")
-        print("---------------------------------------------")
-        eventos_especiales = definir_eventos_especiales(frecuencia)
-        params_ejecucion['eventos_especiales'] = eventos_especiales
+    # Solo ejecutar el análisis estadístico detallado si no es la primera columna
+    if params_ejecucion.get('primer_analisis_hecho', False) is False:
+        # Este análisis ya se hizo en main, así que solo marcamos como hecho
+        params_ejecucion['primer_analisis_hecho'] = True
     else:
-        print("\n6. USANDO EVENTOS ESPECIALES YA DEFINIDOS")
-        print("-----------------------------------------")
-        eventos_especiales = params_ejecucion['eventos_especiales']
+        print(f"\n3. ANALIZANDO ESTADÍSTICAS PARA '{columna_energia}'")
+        print("------------------------")
+        analisis_estadistico_energia(df_original_tratada, columna_energia=columna_energia, frecuencia=frecuencia)
 
     print("\n4. ANALIZANDO CORRELACIONES")
     print("-------------------------")
@@ -2927,7 +2921,8 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, par
             # Crear el ensamble con las predicciones de validación
             ensamble_val = crear_ensamble_mixto(preds_p_val, preds_g_val, preds_w_val, preds_b_val, fechas_val, pesos_ensamble_final)
             if ensamble_val is not None and not ensamble_val.empty:
-                metricas_ensamble = calcular_metricas_modelo(y_true_val, ensamble_val['yhat'].values)
+                y_true_val_aligned = y_true_val[-len(ensamble_val):]
+                metricas_ensamble = calcular_metricas_modelo(y_true_val_aligned, ensamble_val['yhat'].values)
                 metricas_todos_modelos['combinado'] = metricas_ensamble
                 print(f"\nMétricas del Ensamble para '{columna_energia}' (sobre validación histórica):", metricas_ensamble)
 
@@ -2940,7 +2935,7 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, par
         guardar_modelo_ensamblado(modelos_para_guardar, forecast_combinado_futuro, metricas_todos_modelos, pesos_ensamble_final, id_datos_col, columna_energia=columna_energia)
 
     print("\n" + "="*70 + f"\n¡Proceso para {columna_energia.upper()} completado!\n" + "="*70)
-    return forecast_combinado_futuro, ruta_exportacion, params_ejecucion
+    return forecast_combinado_futuro, ruta_exportacion
 
 
 # ==============================================================================
@@ -2971,6 +2966,14 @@ def main():
         periodos_futuros = num_periodos_sug
     print(f"Se proyectarán {periodos_futuros} periodos ({traducir_periodos_a_texto(periodos_futuros, frecuencia)}) para cada categoría.")
 
+    # --- Visualización preliminar y definición de eventos ---
+    columnas_energia_a_procesar = ['residencial', 'comercial', 'industrial', 'otros', 'alumbrado publico']
+    if columnas_energia_a_procesar[0] in df_original.columns:
+        print(f"\nMostrando gráfico de la primera categoría ('{columnas_energia_a_procesar[0]}') para ayudar a definir eventos...")
+        analisis_estadistico_energia(df_original, columnas_energia_a_procesar[0], frecuencia=frecuencia)
+
+    eventos_especiales = definir_eventos_especiales(frecuencia)
+
     growth_input = input(f"Tipo de crecimiento para Prophet (linear/logistic) [sugerido: logistic]: ").lower()
     growth_type = growth_input if growth_input in ['linear', 'logistic'] else 'logistic'
 
@@ -2989,8 +2992,9 @@ def main():
 
     params_ejecucion = {
         'periodos_futuros': periodos_futuros,
-        'preguntar_cargar_modelos': False,
-        'eventos_especiales': None,  # Se definirá en la primera iteración
+        'preguntar_cargar_modelos': False, # No preguntar en cada iteración
+        'eventos_especiales': eventos_especiales,
+        'primer_analisis_hecho': False, # Para controlar la visualización del gráfico
         'growth_type': growth_type,
         'ajuste_adicional_prophet': ajuste_adicional_prophet,
         'usar_diferenciacion_gbr': usar_diferenciacion_gbr,
@@ -3003,15 +3007,12 @@ def main():
 
     for i, columna in enumerate(columnas_energia_a_procesar):
         if i == 0:
-            params_ejecucion['preguntar_cargar_modelos'] = True
+            params_ejecucion['preguntar_cargar_modelos'] = True # Preguntar solo la primera vez
         else:
             params_ejecucion['preguntar_cargar_modelos'] = False
 
         if columna in df_original.columns:
-            # La función ahora devolverá los parámetros actualizados
-            forecast_df, _, params_ejecucion = ejecutar_analisis_para_columna(
-                df_original, columna, frecuencia, params_ejecucion
-            )
+            forecast_df, _ = ejecutar_analisis_para_columna(df_original, columna, frecuencia, params_ejecucion)
             resultados_agregados[columna] = forecast_df
         else:
             print(f"\nADVERTENCIA: La columna '{columna}' no se encontró en el archivo. Saltando su análisis.")
