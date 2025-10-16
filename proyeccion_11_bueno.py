@@ -2727,8 +2727,16 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, par
         print(f"\nUmbral utilizado en el mejor modelo Prophet anterior: {umbral_anterior:.3f}")
         umbral_sugerido = (umbral_anterior + umbral_m) / 2
 
-    umbral_corr = params_ejecucion.get('umbral_correlacion', umbral_sugerido)
-    print(f"Usando umbral de correlación: {umbral_corr:.3f}")
+    if mejor_modelo_anterior_prophet and 'configuracion' in mejor_modelo_anterior_prophet and 'umbral_correlacion' in mejor_modelo_anterior_prophet['configuracion']:
+        umbral_anterior = mejor_modelo_anterior_prophet['configuracion']['umbral_correlacion']
+        print(f"\nUmbral utilizado en el mejor modelo Prophet anterior: {umbral_anterior:.3f}")
+        umbral_sugerido = (umbral_anterior + umbral_m) / 2
+    umbral_input = input(f"\nIngrese el umbral para selección de regresores para '{columna_energia}' (0.0-1.0) [sugerido: {umbral_sugerido:.3f}]: ")
+    try:
+        umbral_corr = float(umbral_input) if umbral_input.strip() else umbral_sugerido
+    except ValueError:
+        print(f"Valor inválido para umbral. Usando sugerido: {umbral_sugerido:.3f}")
+        umbral_corr = umbral_sugerido
     regresores = identificar_regresores_no_lineales(df_original_tratada, target_variable=columna_energia, threshold=umbral_corr, metodo=metodo_corr)
 
     eventos_especiales = params_ejecucion['eventos_especiales']
@@ -2952,9 +2960,6 @@ def main():
         periodos_futuros = num_periodos_sug
     print(f"Se proyectarán {periodos_futuros} periodos ({traducir_periodos_a_texto(periodos_futuros, frecuencia)}) para cada categoría.")
 
-    umbral_input = input(f"\nIngrese el umbral para selección de regresores (0.0-1.0) [sugerido: 0.4]: ")
-    umbral_corr = float(umbral_input) if umbral_input.strip() else 0.4
-
     eventos_especiales = definir_eventos_especiales(frecuencia)
 
     growth_input = input(f"Tipo de crecimiento para Prophet (linear/logistic) [sugerido: logistic]: ").lower()
@@ -2976,7 +2981,6 @@ def main():
     params_ejecucion = {
         'periodos_futuros': periodos_futuros,
         'preguntar_cargar_modelos': False, # No preguntar en cada iteración
-        'umbral_correlacion': umbral_corr,
         'eventos_especiales': eventos_especiales,
         'growth_type': growth_type,
         'ajuste_adicional_prophet': ajuste_adicional_prophet,
