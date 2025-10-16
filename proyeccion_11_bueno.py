@@ -2916,7 +2916,11 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, par
             # Crear el ensamble con las predicciones de validación
             ensamble_val = crear_ensamble_mixto(preds_p_val, preds_g_val, preds_w_val, preds_b_val, fechas_val, pesos_ensamble_final)
             if ensamble_val is not None and not ensamble_val.empty:
-                metricas_ensamble = calcular_metricas_modelo(y_true_val, ensamble_val['yhat'].values)
+                # Alinear y_true_val con las predicciones del ensamble, que pueden ser más cortas
+                num_predicciones_ensamble = len(ensamble_val['yhat'])
+                y_true_val_alineado = y_true_val[-num_predicciones_ensamble:]
+
+                metricas_ensamble = calcular_metricas_modelo(y_true_val_alineado, ensamble_val['yhat'].values)
                 metricas_todos_modelos['combinado'] = metricas_ensamble
                 print(f"\nMétricas del Ensamble para '{columna_energia}' (sobre validación histórica):", metricas_ensamble)
 
