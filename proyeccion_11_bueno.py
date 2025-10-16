@@ -1373,33 +1373,70 @@ def entrenar_modelo_prophet_continuo(df, modelo_anterior=None, regresores=None, 
     if regresores:
         for r_name in regresores:
             if r_name in df.columns:
-                # Usar los últimos 12 puntos para la tendencia, o menos si no hay suficientes datos
-                puntos_tendencia = min(12, len(df))
-                ultimos_puntos = df.tail(puntos_tendencia)
+                print(f"  Extrapolando regresor '{r_name}'...")
 
-                # Crear un modelo lineal simple para el regresor
-                X_trend = np.arange(len(ultimos_puntos)).reshape(-1, 1)
-                y_trend = ultimos_puntos[r_name].values
+                # 1. Descomposición de la serie del regresor
+                regressor_series = df[['ds', r_name]].set_index('ds')[r_name]
 
-                trend_model = LinearRegression()
-                trend_model.fit(X_trend, y_trend)
+                # Asegurarse de que hay suficientes datos para la descomposición
+                seasonal_period = obtener_estacionalidad(frecuencia)
+                if len(regressor_series) >= seasonal_period * 2:
+                    try:
+                        # Usamos seasonal_decompose de statsmodels
+                        decomposition = seasonal_decompose(regressor_series, model='additive', period=seasonal_period)
+                        trend = decomposition.trend.dropna()
+                        seasonal = decomposition.seasonal
+                    except ValueError as e:
+                        print(f"    Advertencia: No se pudo descomponer '{r_name}', usando tendencia lineal simple. Error: {e}")
+                        trend = regressor_series # Fallback a usar la serie completa como tendencia
+                        seasonal = pd.Series(np.zeros(len(regressor_series)), index=regressor_series.index) # Sin estacionalidad
+                else:
+                    print(f"    Advertencia: Datos insuficientes para descomposición estacional de '{r_name}'. Usando tendencia lineal simple.")
+                    trend = regressor_series
+                    seasonal = pd.Series(np.zeros(len(regressor_series)), index=regressor_series.index)
 
-                # Crear los puntos futuros para la predicción del regresor
-                # El índice comienza desde el final de los puntos de tendencia
-                future_steps = np.arange(puntos_tendencia, puntos_tendencia + periodos_futuros).reshape(-1, 1)
+                # 2. Extrapolar la tendencia
+                # Usar los últimos puntos de la tendencia para el modelo lineal
+                puntos_tendencia_fit = min(seasonal_period, len(trend))
+                if puntos_tendencia_fit < 2:
+                    print(f"    Advertencia: No hay suficientes puntos de tendencia para '{r_name}'. Usando la media.")
+                    future_trend = np.full(periodos_futuros, trend.mean() if not trend.empty else 0)
+                else:
+                    X_trend = np.arange(len(trend)).reshape(-1, 1)[-puntos_tendencia_fit:]
+                    y_trend = trend.values[-puntos_tendencia_fit:]
 
-                # Predecir los valores futuros del regresor
-                future_regressor_values = trend_model.predict(future_steps)
+                    trend_model = LinearRegression()
+                    trend_model.fit(X_trend, y_trend)
 
-                # Asignar los valores históricos y los proyectados
+                    # Forzar pendiente no negativa
+                    if trend_model.coef_[0] < 0:
+                        print(f"    Pendiente de tendencia para '{r_name}' era negativa ({trend_model.coef_[0]:.4f}), forzando a cero.")
+                        trend_model.coef_[0] = 0
+
+                    future_steps_trend = np.arange(len(trend), len(trend) + periodos_futuros).reshape(-1, 1)
+                    future_trend = trend_model.predict(future_steps_trend)
+
+                # 3. Proyectar la estacionalidad
+                # Repetir el último ciclo estacional
+                last_seasonal_cycle = seasonal.values[-seasonal_period:]
+                future_seasonal = np.tile(last_seasonal_cycle, periodos_futuros // seasonal_period + 1)[:periodos_futuros]
+
+                # 4. Combinar tendencia y estacionalidad para la predicción del regresor
+                future_regressor_values = future_trend + future_seasonal
+
+                # Asignar los valores históricos y los proyectados al dataframe 'future'
                 future.loc[:len(df)-1, r_name] = df[r_name].values
-                # Asegurarse de que la longitud de los valores coincide con la del slice del DataFrame
-                if len(future.loc[len(df):, r_name]) == len(future_regressor_values):
+
+                # Verificar la longitud antes de asignar
+                future_slice_len = len(future.loc[len(df):, r_name])
+                if future_slice_len == len(future_regressor_values):
                     future.loc[len(df):, r_name] = future_regressor_values
                 else:
-                    # Si hay un desajuste, usar el método de rellenado como fallback
-                    print(f"Advertencia: Desajuste de longitud en la extrapolación del regresor '{r_name}'. Usando ffill.")
-                    future[r_name] = future[r_name].ffill().bfill()
+                    print(f"    Advertencia: Desajuste de longitud en la extrapolación del regresor '{r_name}'. Rellenando.")
+                    # Asignar lo que se pueda y rellenar el resto
+                    min_len = min(future_slice_len, len(future_regressor_values))
+                    future.loc[len(df):len(df)+min_len-1, r_name] = future_regressor_values[:min_len]
+                    future[r_name] = future[r_name].ffill().bfill() # Rellenar por si acaso
 
     forecast = model.predict(future)
     if ajuste_adicional:
@@ -2630,14 +2667,15 @@ def visualizar_energia_potencia(forecast_combinado, df_original=None, incluir_mo
 # 7. MAIN APPLICATION LOGIC
 # ==============================================================================
 
-def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia):
+def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, params_ejecucion):
     """
     Ejecuta el pipeline completo de análisis y pronóstico para una columna de energía específica.
 
     Args:
         df_original (pd.DataFrame): El DataFrame completo con todos los datos.
         columna_energia (str): El nombre de la columna a analizar y predecir.
-        frecuencia (str): La frecuencia detectada de los datos ('mensual', 'diario', etc.).
+        frecuencia (str): La frecuencia detectada de los datos.
+        params_ejecucion (dict): Diccionario con parámetros definidos por el usuario.
 
     Returns:
         tuple: Un tuple con el DataFrame de pronóstico y la ruta del archivo exportado.
@@ -2656,21 +2694,14 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia):
                                                      metodo='iqr',
                                                      estrategia_tratamiento='cap')
 
-    num_periodos_sug = obtener_periodos_sugeridos(frecuencia)
-    periodos_in = input(f"\n¿Cuántos periodos desea proyectar para todas las categorías? (sugerido: {num_periodos_sug}): ")
-    try:
-        periodos_futuros = int(periodos_in) if periodos_in.strip() else num_periodos_sug
-    except ValueError:
-        print(f"Valor no válido. Usando valor sugerido: {num_periodos_sug}")
-        periodos_futuros = num_periodos_sug
-    print(f"Se proyectarán {periodos_futuros} periodos ({traducir_periodos_a_texto(periodos_futuros, frecuencia)}) para cada categoría.")
+    periodos_futuros = params_ejecucion['periodos_futuros']
 
     print(f"\nCargando modelos anteriores para '{columna_energia}'...")
     modelos_anteriores = cargar_modelos_anteriores(id_datos_col)
 
     print(f"\n2. VERIFICANDO MODELOS ANTERIORES (PROPHET) PARA '{columna_energia}'")
     print("-----------------------------------------------------")
-    mejor_modelo_anterior_prophet = cargar_mejor_modelo_anterior(preguntar=True, id_datos=id_datos_col)
+    mejor_modelo_anterior_prophet = cargar_mejor_modelo_anterior(preguntar=params_ejecucion['preguntar_cargar_modelos'], id_datos=id_datos_col)
 
     print(f"\n3. ANALIZANDO ESTADÍSTICAS PARA '{columna_energia}'")
     print("------------------------")
@@ -2689,25 +2720,13 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia):
         umbral_anterior = mejor_modelo_anterior_prophet['configuracion']['umbral_correlacion']
         print(f"\nUmbral utilizado en el mejor modelo Prophet anterior: {umbral_anterior:.3f}")
         umbral_sugerido = (umbral_anterior + umbral_m) / 2
-    umbral_input = input(f"\nIngrese el umbral para selección de regresores (0.0-1.0) [sugerido: {umbral_sugerido:.3f}]: ")
-    try:
-        umbral_corr = float(umbral_input) if umbral_input.strip() else umbral_sugerido
-    except ValueError:
-        print(f"Valor inválido para umbral. Usando sugerido: {umbral_sugerido:.3f}")
-        umbral_corr = umbral_sugerido
+
+    umbral_corr = params_ejecucion.get('umbral_correlacion', umbral_sugerido)
+    print(f"Usando umbral de correlación: {umbral_corr:.3f}")
     regresores = identificar_regresores_no_lineales(df_original_tratada, target_variable=columna_energia, threshold=umbral_corr, metodo=metodo_corr)
 
-    print("\n6. DEFINIENDO EVENTOS ESPECIALES")
-    print("------------------------------")
-    eventos_especiales = definir_eventos_especiales(frecuencia)
-
-    print("\n7. CONFIGURANDO TIPO DE CRECIMIENTO (PROPHET)")
-    print("-------------------------------------------")
-    growth_type_sugerido = 'logistic'
-    if mejor_modelo_anterior_prophet and 'configuracion' in mejor_modelo_anterior_prophet and 'growth_type' in mejor_modelo_anterior_prophet['configuracion']:
-        growth_type_sugerido = mejor_modelo_anterior_prophet['configuracion']['growth_type']
-    growth_input = input(f"Tipo de crecimiento para Prophet (linear/logistic) [sugerido: {growth_type_sugerido}]: ").lower()
-    growth_type = growth_input if growth_input in ['linear', 'logistic'] else growth_type_sugerido
+    eventos_especiales = params_ejecucion['eventos_especiales']
+    growth_type = params_ejecucion['growth_type']
 
     print("\n8. PREPARANDO DATOS PARA PROPHET")
     print("------------------------------")
@@ -2729,13 +2748,8 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia):
             if cp_col_prophet not in regresores:
                 regresores.append(cp_col_prophet)
                 print(f"  Regresor '{cp_col_prophet}' añadido a Prophet.")
-    df_para_entrenar_prophet = df_prophet_con_cp
 
-    print("\n10. CONFIGURANDO AJUSTES ADICIONALES (PROPHET)")
-    print("---------------------------------------------")
-    respuesta_ajuste = input("Aplicar ajustes adicionales a Prophet? (s/n, default: s): ").lower()
-    ajuste_adicional = respuesta_ajuste != 'n'
-    print(f"  Ajustes adicionales para Prophet se aplicarán: {ajuste_adicional}")
+    ajuste_adicional = params_ejecucion['ajuste_adicional_prophet']
 
     print("\n11. OPTIMIZANDO HIPERPARÁMETROS (PROPHET)")
     print("---------------------------------------")
@@ -2744,15 +2758,15 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia):
         param_grid_refinado = refinar_hiperparametros(mejor_modelo_anterior_prophet, df_original_tratada)
         if param_grid_refinado:
             print("Optimizando Prophet con grid refinado basado en modelo anterior...")
-            best_params_prophet, _, _ = optimizar_hiperparametros_refinados(df_para_entrenar_prophet, param_grid_refinado, regresores, growth_type, eventos_especiales)
+            best_params_prophet, _, _ = optimizar_hiperparametros_refinados(df_prophet_con_cp, param_grid_refinado, regresores, growth_type, eventos_especiales)
     if best_params_prophet is None:
         print("Realizando optimización completa de hiperparámetros para Prophet...")
-        best_params_prophet, _, _ = optimizar_hiperparametros(df_para_entrenar_prophet, regresores, growth_type, eventos_especiales)
+        best_params_prophet, _, _ = optimizar_hiperparametros(df_prophet_con_cp, regresores, growth_type, eventos_especiales)
 
     print("\n12. ENTRENANDO MODELO PROPHET FINAL")
     print("---------------------------------")
     modelo_prophet, forecast_prophet, metricas_prophet = entrenar_modelo_prophet_continuo(
-        df_para_entrenar_prophet, modelo_anterior=modelos_anteriores.get('prophet_model'),
+        df_prophet_con_cp, modelo_anterior=modelos_anteriores.get('prophet_model'),
         regresores=regresores, growth_type=growth_type, eventos=eventos_especiales,
         params=best_params_prophet, periodos_futuros=periodos_futuros,
         ajuste_adicional=ajuste_adicional, frecuencia=frecuencia
@@ -2760,11 +2774,8 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia):
 
     print("\n13. ENTRENANDO MODELOS AVANZADOS (GRU, WAVENET, GBR)")
     print("--------------------------------------------------")
-    usar_diferenciacion_gbr_input = input(f"¿Usar diferenciación para GBR en '{columna_energia}'? (s/n, default: s): ").lower()
-    usar_diferenciacion_gbr_bool = usar_diferenciacion_gbr_input != 'n'
-    print(f"GBR usará diferenciación: {usar_diferenciacion_gbr_bool}")
-    use_attention_gru_input_str = input(f"¿Usar atención en GRU para '{columna_energia}'? (s/n, default: n): ").lower()
-    use_attention_gru_bool = use_attention_gru_input_str == 's'
+    usar_diferenciacion_gbr_bool = params_ejecucion['usar_diferenciacion_gbr']
+    use_attention_gru_bool = params_ejecucion['usar_atencion_gru']
     mi_config_gru = {
         'gru_units': [80, 40], 'dense_units': [20], 'dropout_rate': 0.2,
         'bidirectional': True, 'use_attention': use_attention_gru_bool, 'attention_heads': 4,
@@ -2778,9 +2789,7 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia):
         'activation_conv': 'relu', 'activation_dense': 'relu',
         'optimizer_type': 'adam', 'learning_rate': 0.001, 'loss_function': 'huber'
     }
-    gbr_loss_options = ['huber', 'squared_error', 'absolute_error', 'quantile']
-    gbr_loss_input = input(f"Pérdida para GBR en '{columna_energia}' ({', '.join(gbr_loss_options)}, default: huber): ").lower()
-    if gbr_loss_input not in gbr_loss_options: gbr_loss_input = 'huber'
+    gbr_loss_input = params_ejecucion['gbr_loss']
     mi_config_gbr = {
         'n_estimators': 500, 'learning_rate': 0.02, 'max_depth': 5,
         'min_samples_split': 10, 'min_samples_leaf': 5, 'subsample': 0.8, 'max_features': 'sqrt',
@@ -2813,7 +2822,7 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia):
 
     print("\n14. GENERANDO PREDICCIONES FUTURAS (INDIVIDUALES)")
     print("-------------------------------------------------")
-    ultima_fecha_historica = df_para_entrenar_prophet['ds'].max()
+    ultima_fecha_historica = df_prophet_con_cp['ds'].max()
     fechas_futuras = pd.date_range(start=ultima_fecha_historica, periods=periodos_futuros + 1, freq=obtener_freq_prophet(frecuencia))[1:]
     forecast_prophet_futuro = forecast_prophet[forecast_prophet['ds'] > ultima_fecha_historica].copy()
 
@@ -2919,12 +2928,63 @@ def main():
         print("No se pudieron cargar los datos. El programa terminará.")
         return
 
+    print("\n2. CONFIGURACIÓN GENERAL DE LA EJECUCIÓN")
+    print("---------------------------------------")
+
+    # Mover las preguntas al inicio, fuera del bucle
+    num_periodos_sug = obtener_periodos_sugeridos(frecuencia)
+    periodos_in = input(f"\n¿Cuántos periodos desea proyectar para todas las categorías? (sugerido: {num_periodos_sug}): ")
+    try:
+        periodos_futuros = int(periodos_in) if periodos_in.strip() else num_periodos_sug
+    except ValueError:
+        print(f"Valor no válido. Usando valor sugerido: {num_periodos_sug}")
+        periodos_futuros = num_periodos_sug
+    print(f"Se proyectarán {periodos_futuros} periodos ({traducir_periodos_a_texto(periodos_futuros, frecuencia)}) para cada categoría.")
+
+    umbral_input = input(f"\nIngrese el umbral para selección de regresores (0.0-1.0) [sugerido: 0.4]: ")
+    umbral_corr = float(umbral_input) if umbral_input.strip() else 0.4
+
+    eventos_especiales = definir_eventos_especiales(frecuencia)
+
+    growth_input = input(f"Tipo de crecimiento para Prophet (linear/logistic) [sugerido: logistic]: ").lower()
+    growth_type = growth_input if growth_input in ['linear', 'logistic'] else 'logistic'
+
+    respuesta_ajuste = input("Aplicar ajustes adicionales a Prophet? (s/n, default: s): ").lower()
+    ajuste_adicional_prophet = respuesta_ajuste != 'n'
+
+    usar_diferenciacion_gbr_input = input("¿Usar diferenciación para GBR en todos los modelos? (s/n, default: s): ").lower()
+    usar_diferenciacion_gbr = usar_diferenciacion_gbr_input != 'n'
+
+    use_attention_gru_input_str = input("¿Usar atención en GRU para todos los modelos? (s/n, default: n): ").lower()
+    usar_atencion_gru = use_attention_gru_input_str == 's'
+
+    gbr_loss_options = ['huber', 'squared_error', 'absolute_error', 'quantile']
+    gbr_loss_input = input(f"Pérdida para GBR en todos los modelos ({', '.join(gbr_loss_options)}, default: huber): ").lower()
+    if gbr_loss_input not in gbr_loss_options: gbr_loss_input = 'huber'
+
+    params_ejecucion = {
+        'periodos_futuros': periodos_futuros,
+        'preguntar_cargar_modelos': False, # No preguntar en cada iteración
+        'umbral_correlacion': umbral_corr,
+        'eventos_especiales': eventos_especiales,
+        'growth_type': growth_type,
+        'ajuste_adicional_prophet': ajuste_adicional_prophet,
+        'usar_diferenciacion_gbr': usar_diferenciacion_gbr,
+        'usar_atencion_gru': usar_atencion_gru,
+        'gbr_loss': gbr_loss_input
+    }
+
     columnas_energia_a_procesar = ['residencial', 'comercial', 'industrial', 'otros', 'alumbrado publico']
     resultados_agregados = {}
 
-    for columna in columnas_energia_a_procesar:
+    for i, columna in enumerate(columnas_energia_a_procesar):
+        if i == 0:
+            params_ejecucion['preguntar_cargar_modelos'] = True # Preguntar solo la primera vez
+        else:
+            params_ejecucion['preguntar_cargar_modelos'] = False
+
         if columna in df_original.columns:
-            forecast_df, _ = ejecutar_analisis_para_columna(df_original, columna, frecuencia)
+            forecast_df, _ = ejecutar_analisis_para_columna(df_original, columna, frecuencia, params_ejecucion)
             resultados_agregados[columna] = forecast_df
         else:
             print(f"\nADVERTENCIA: La columna '{columna}' no se encontró en el archivo. Saltando su análisis.")
