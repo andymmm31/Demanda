@@ -263,14 +263,14 @@ def crear_impulsor_de_crecimiento(df, periodos_futuros, frecuencia):
         fechas_año_anterior = df_impulsor[df_impulsor['ds'].dt.year == año_anterior]['ds']
         fechas_año_actual = df_impulsor[df_impulsor['ds'].dt.year == año]['ds']
 
-        if not fechas_año_anterior.empty and not fechas_año_actual.empty:
-             # Asignar el valor al inicio del año actual y al final para la interpolación
-            df_impulsor.loc[df_impulsor['ds'] == fechas_año_actual.min(), 'impulsor_crecimiento'] = valor_impulsor_año
+        # Asignar el valor al inicio del año para que la interpolación funcione correctamente
+        df_impulsor.loc[df_impulsor['ds'].dt.year == año, 'impulsor_crecimiento'] = valor_impulsor_año
 
     # Rellenar los valores históricos y los huecos mediante interpolación
     df_impulsor = df_impulsor.set_index('ds')
     df_impulsor.loc[df_impulsor.index < '2024-01-01', 'impulsor_crecimiento'] = 1.0 # Histórico es 1
-    df_impulsor['impulsor_crecimiento'] = df_impulsor['impulsor_crecimiento'].interpolate(method='linear')
+    # Interpolar linealmente entre los valores de inicio de año
+    df_impulsor['impulsor_crecimiento'] = df_impulsor['impulsor_crecimiento'].interpolate(method='linear').ffill().bfill()
     df_impulsor = df_impulsor.reset_index()
 
     print("Impulsor de crecimiento creado exitosamente.")
@@ -1147,7 +1147,7 @@ def encontrar_mejor_prophet_lineal(df_prophet, regresores=None, eventos=None, pe
             )
             if regresores:
                 for r in regresores:
-                    if r in df_prophet.columns: model.add_regressor(r)
+                    if r in df_prophet.columns: model.add_regressor(r, standardize=True)
             if frecuencia == 'mensual': model.add_seasonality(name='yearly', period=365.25, fourier_order=10)
             if eventos is not None: model.holidays = eventos
 
@@ -1242,7 +1242,7 @@ def entrenar_modelo_prophet(df, regresores=None, growth_type='logistic', eventos
         print(f"Capacidad para logístico: {cap:.2f}")
     if regresores:
         for r in regresores:
-            if r in df.columns: model.add_regressor(r)
+            if r in df.columns: model.add_regressor(r, standardize=True)
     if frecuencia == 'mensual': model.add_seasonality(name='yearly', period=365.25, fourier_order=10)
     elif frecuencia == 'diario': model.add_seasonality(name='yearly', period=365.25, fourier_order=10); model.add_seasonality(name='weekly', period=7, fourier_order=3)
     elif frecuencia in ['horario', 'sub-horario']: model.add_seasonality(name='yearly', period=365.25, fourier_order=10); model.add_seasonality(name='weekly', period=7, fourier_order=3); model.add_seasonality(name='daily', period=1, fourier_order=6)
@@ -1346,7 +1346,7 @@ def _entrenar_prophet_silencioso(df_in, regresores_in, growth_in, eventos_in, pa
     if regresores_in:
         for r in regresores_in:
             if r in df_in.columns:
-                model.add_regressor(r)
+                model.add_regressor(r, standardize=True)
 
     model.add_seasonality(name='yearly', period=365.25, fourier_order=10)
     if eventos_in is not None:
@@ -1550,7 +1550,7 @@ def entrenar_modelo_prophet_continuo(df, modelo_anterior=None, regresores=None, 
             else: cap = df['y'].quantile(0.95) * 2; df['cap'] = cap; print(f"  Estableciendo nueva capacidad máxima: {cap:.2f}")
         if regresores:
             for r in regresores:
-                if r in df.columns: model.add_regressor(r); print(f"  Añadido regresor: {r}")
+                if r in df.columns: model.add_regressor(r, standardize=True); print(f"  Añadido regresor: {r}")
         if frecuencia == 'mensual': model.add_seasonality(name='yearly', period=365.25, fourier_order=10)
         elif frecuencia == 'diario': model.add_seasonality(name='yearly', period=365.25, fourier_order=10); model.add_seasonality(name='weekly', period=7, fourier_order=3)
         elif frecuencia in ['horario', 'sub-horario']: model.add_seasonality(name='yearly', period=365.25, fourier_order=10); model.add_seasonality(name='weekly', period=7, fourier_order=3); model.add_seasonality(name='daily', period=1, fourier_order=6)
@@ -1561,7 +1561,7 @@ def entrenar_modelo_prophet_continuo(df, modelo_anterior=None, regresores=None, 
         if growth_type == 'logistic' and 'cap' not in df.columns: cap = df['y'].quantile(0.95) * 2; df['cap'] = cap; print(f"Capacidad para logístico: {cap:.2f}")
         if regresores:
             for r in regresores:
-                if r in df.columns: model.add_regressor(r)
+                if r in df.columns: model.add_regressor(r, standardize=True)
         if frecuencia == 'mensual': model.add_seasonality(name='yearly', period=365.25, fourier_order=10)
         elif frecuencia == 'diario': model.add_seasonality(name='yearly', period=365.25, fourier_order=10); model.add_seasonality(name='weekly', period=7, fourier_order=3)
         elif frecuencia in ['horario', 'sub-horario']: model.add_seasonality(name='yearly', period=365.25, fourier_order=10); model.add_seasonality(name='weekly', period=7, fourier_order=3); model.add_seasonality(name='daily', period=1, fourier_order=6)
@@ -3154,15 +3154,15 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, per
         features_futuras_avanzadas['growth_driver_feature_futuro'] = impulsor_futuro
 
     if 'gru_avanzado' in modelos_avanzados_entrenados:
-        predicciones_gru_residuos = predecir_con_rnn(modelos_avanzados_entrenados['gru_avanzado'], residuos, periodos_futuros, frecuencia=frecuencia, **features_futuras_avanzadas)
+        predicciones_gru_residuos = predecir_con_rnn(modelos_avanzados_entrenados['gru_avanzado'], datos_hist_energia, periodos_futuros, frecuencia=frecuencia, **features_futuras_avanzadas)
         predicciones_gru = forecast_prophet_futuro['yhat'].values + predicciones_gru_residuos
         print("Predicciones GRU (futuras) generadas a partir de residuos.")
     if 'wavenet' in modelos_avanzados_entrenados:
-        predicciones_wavenet_residuos = predecir_con_rnn(modelos_avanzados_entrenados['wavenet'], residuos, periodos_futuros, frecuencia=frecuencia, **features_futuras_avanzadas)
+        predicciones_wavenet_residuos = predecir_con_rnn(modelos_avanzados_entrenados['wavenet'], datos_hist_energia, periodos_futuros, frecuencia=frecuencia, **features_futuras_avanzadas)
         predicciones_wavenet = forecast_prophet_futuro['yhat'].values + predicciones_wavenet_residuos
         print("Predicciones WaveNet (futuras) generadas a partir de residuos.")
     if 'gradient_boosting' in modelos_avanzados_entrenados:
-        predicciones_gbr_residuos = predecir_con_gbr(modelos_avanzados_entrenados['gradient_boosting'], residuos, periodos_futuros, frecuencia=frecuencia, **features_futuras_avanzadas)
+        predicciones_gbr_residuos = predecir_con_gbr(modelos_avanzados_entrenados['gradient_boosting'], datos_hist_energia, periodos_futuros, frecuencia=frecuencia, **features_futuras_avanzadas)
         predicciones_gbr = forecast_prophet_futuro['yhat'].values + predicciones_gbr_residuos
         print("Predicciones GBR (futuras) generadas a partir de residuos.")
 
