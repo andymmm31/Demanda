@@ -2933,9 +2933,6 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, per
     if gbr_loss_input not in gbr_loss_options: gbr_loss_input = 'huber'
     print("----------------------------------\n")
 
-    # Definir eventos especiales específicos para esta columna
-    eventos_especiales = definir_eventos_especiales(frecuencia)
-
     # El id_datos ahora será específico para cada columna
     id_datos_col = f"{hash(columna_energia)}_{str(abs(hash(tuple(df_original[columna_energia].values))))[:10]}"
 
