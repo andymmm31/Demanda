@@ -2901,7 +2901,7 @@ def visualizar_energia_potencia(forecast_combinado, df_original=None, incluir_mo
 # 7. MAIN APPLICATION LOGIC
 # ==============================================================================
 
-def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, periodos_futuros, eventos_especiales, preguntar_cargar_modelos=False):
+def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, periodos_futuros, preguntar_cargar_modelos=False):
     """
     Ejecuta el pipeline completo de análisis y pronóstico para una columna de energía específica.
 
@@ -2910,7 +2910,6 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, per
         columna_energia (str): El nombre de la columna a analizar y predecir.
         frecuencia (str): La frecuencia detectada de los datos.
         periodos_futuros (int): Número de periodos a predecir.
-        eventos_especiales (pd.DataFrame): DataFrame con eventos especiales.
         preguntar_cargar_modelos (bool): Si se debe preguntar al usuario si desea cargar modelos anteriores.
 
     Returns:
@@ -2938,6 +2937,8 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, per
     if gbr_loss_input not in gbr_loss_options: gbr_loss_input = 'huber'
     print("----------------------------------\n")
 
+    # Definir eventos especiales específicos para esta columna
+    eventos_especiales = definir_eventos_especiales(frecuencia)
 
     # El id_datos ahora será específico para cada columna
     id_datos_col = f"{hash(columna_energia)}_{str(abs(hash(tuple(df_original[columna_energia].values))))[:10]}"
@@ -3245,14 +3246,6 @@ def main():
         periodos_futuros = num_periodos_sug
     print(f"Se proyectarán {periodos_futuros} periodos ({traducir_periodos_a_texto(periodos_futuros, frecuencia)}) para cada categoría.")
 
-    # --- Visualización preliminar y definición de eventos ---
-    columnas_energia_a_procesar = ['residencial', 'comercial', 'industrial', 'otros', 'alumbrado publico']
-    if columnas_energia_a_procesar[0] in df_original.columns:
-        print(f"\nMostrando gráfico de la primera categoría ('{columnas_energia_a_procesar[0]}') para ayudar a definir eventos...")
-        analisis_estadistico_energia(df_original, columnas_energia_a_procesar[0], frecuencia=frecuencia)
-
-    eventos_especiales = definir_eventos_especiales(frecuencia)
-
     columnas_energia_a_procesar = ['residencial', 'comercial', 'industrial', 'otros', 'alumbrado publico']
     resultados_agregados = {}
 
@@ -3264,7 +3257,6 @@ def main():
                 columna,
                 frecuencia,
                 periodos_futuros,
-                eventos_especiales,
                 preguntar_cargar_modelos=(i == 0)
             )
             resultados_agregados[columna] = forecast_df
