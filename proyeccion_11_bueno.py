@@ -216,6 +216,74 @@ def detectar_y_tratar_outliers(df, columna_energia, metodo='iqr', factor_iqr=1.5
 
     return df_tratado
 
+def crear_impulsor_de_crecimiento(df, periodos_futuros, frecuencia):
+    """
+    Crea una serie temporal artificial que actúa como un impulsor de crecimiento
+    personalizado, reflejando expectativas de negocio específicas.
+
+    Args:
+        df (pd.DataFrame): DataFrame con la columna 'Date'.
+        periodos_futuros (int): Número de periodos a predecir.
+        frecuencia (str): Frecuencia de los datos ('mensual', 'diario', etc.).
+
+    Returns:
+        pd.DataFrame: Un DataFrame con las columnas 'ds' e 'impulsor_crecimiento'.
+    """
+    print("\nCreando impulsor de crecimiento personalizado...")
+    # 1. Crear el DataFrame completo de fechas (históricas + futuras)
+    ultima_fecha_hist = df['Date'].max()
+    freq_prophet = obtener_freq_prophet(frecuencia)
+    fechas_futuras = pd.date_range(start=ultima_fecha_hist, periods=periodos_futuros + 1, freq=freq_prophet)[1:]
+    fechas_totales = pd.to_datetime(pd.concat([df['Date'], pd.Series(fechas_futuras)], ignore_index=True))
+
+    df_impulsor = pd.DataFrame({'ds': fechas_totales})
+    df_impulsor['impulsor_crecimiento'] = 1.0 # Valor base
+
+    # 2. Definir las tasas de crecimiento por año
+    tasas_anuales = {
+        2024: -0.025, # Caída del 2.5%
+        2025: 0.10,   # Subida del 10%
+    }
+    tasa_default_post_2025 = 0.035 # Crecimiento del 3.5%
+
+    # 3. Aplicar las tasas de crecimiento al impulsor
+    valor_impulsor = 1.0
+    ultimo_valor_anual = {2023: 1.0} # Empezamos con valor 1 para el último año histórico
+
+    años_a_proyectar = sorted(list(set(df_impulsor[df_impulsor['ds'].dt.year >= 2024]['ds'].dt.year)))
+
+    for año in años_a_proyectar:
+        año_anterior = año - 1
+        tasa = tasas_anuales.get(año, tasa_default_post_2025)
+        valor_base_año = ultimo_valor_anual[año_anterior]
+        valor_impulsor_año = valor_base_año * (1 + tasa)
+        ultimo_valor_anual[año] = valor_impulsor_año
+
+        # Interpolar linealmente para obtener valores mensuales/diarios dentro del año
+        fechas_año_anterior = df_impulsor[df_impulsor['ds'].dt.year == año_anterior]['ds']
+        fechas_año_actual = df_impulsor[df_impulsor['ds'].dt.year == año]['ds']
+
+        if not fechas_año_anterior.empty and not fechas_año_actual.empty:
+             # Asignar el valor al inicio del año actual y al final para la interpolación
+            df_impulsor.loc[df_impulsor['ds'] == fechas_año_actual.min(), 'impulsor_crecimiento'] = valor_impulsor_año
+
+    # Rellenar los valores históricos y los huecos mediante interpolación
+    df_impulsor = df_impulsor.set_index('ds')
+    df_impulsor.loc[df_impulsor.index < '2024-01-01', 'impulsor_crecimiento'] = 1.0 # Histórico es 1
+    df_impulsor['impulsor_crecimiento'] = df_impulsor['impulsor_crecimiento'].interpolate(method='linear')
+    df_impulsor = df_impulsor.reset_index()
+
+    print("Impulsor de crecimiento creado exitosamente.")
+    plt.figure(figsize=(10, 5))
+    plt.plot(df_impulsor['ds'], df_impulsor['impulsor_crecimiento'])
+    plt.title('Impulsor de Crecimiento Personalizado')
+    plt.ylabel('Valor del Impulsor')
+    plt.xlabel('Fecha')
+    plt.grid(True)
+    plt.show()
+
+    return df_impulsor
+
 # ==============================================================================
 # 2. DATA LOADING, PREPROCESSING & ANALYSIS FUNCTIONS
 # ==============================================================================
@@ -1603,21 +1671,21 @@ def entrenar_modelo_prophet_continuo(df, modelo_anterior=None, regresores=None, 
 
 def predecir_con_rnn(modelo_info, datos_historicos_energia_input, periodos_futuros=120,
                      estacionalidad_periodos=None, frecuencia='mensual',
-                     changepoint_features_futuras=None): # changepoint_features_futuras es opcional
+                     changepoint_features_futuras=None,
+                     growth_driver_feature_futuro=None):
     """
     Realizar predicciones con un modelo de red neuronal (GRU/WaveNet).
     Maneja múltiples features de entrada si el modelo fue entrenado con ellas.
     Añade componente estacional simple a la predicción de la target principal.
 
     Args:
-        modelo_info: Diccionario con modelo y metadatos (scaler, time_steps, n_features_model_input,
-                     scaler_n_features_original_fit, scaler_target_idx, feature_names_input).
-        datos_historicos_energia_input: Array NumPy 1D con los datos históricos SOLO de la variable energía.
-        periodos_futuros: Número de períodos futuros a predecir.
-        estacionalidad_periodos: Número de períodos en un ciclo estacional (si es None, se determina por frecuencia).
-        frecuencia: Frecuencia de los datos ('mensual', 'diario', 'horario', etc.).
-        changepoint_features_futuras: DataFrame opcional con 'ds' y las columnas de CP para el futuro.
-                                      Debe cubrir los 'periodos_futuros'. Si se usaron CPs en el entrenamiento.
+        modelo_info: Diccionario con modelo y metadatos.
+        datos_historicos_energia_input: Array con datos históricos de energía.
+        periodos_futuros: Número de períodos a predecir.
+        estacionalidad_periodos: Número de períodos en un ciclo estacional.
+        frecuencia: Frecuencia de los datos.
+        changepoint_features_futuras: DataFrame con features de changepoint futuras.
+        growth_driver_feature_futuro: DataFrame con el impulsor de crecimiento futuro.
 
     Returns:
         array: Array NumPy con predicciones desnormalizadas (solo para la variable energía).
@@ -1746,7 +1814,7 @@ def predecir_con_rnn(modelo_info, datos_historicos_energia_input, periodos_futur
     return predicciones_energia_desnormalizadas.flatten()
 
 def predecir_con_gbr(modelo_info, datos_historicos_energia_input, periodos_futuros=120, frecuencia='mensual',
-                     changepoint_features_futuras=None):
+                     changepoint_features_futuras=None, growth_driver_feature_futuro=None):
     """
     Realizar predicciones con un modelo Gradient Boosting Regressor.
     Maneja si el modelo fue entrenado con datos diferenciados.
@@ -2052,6 +2120,7 @@ def entrenar_modelos_avanzados_continuo(df, modelo_gru_anterior=None, modelo_wav
                                       batch_size=32, id_datos=None, frecuencia='mensual',
                                       usar_diferenciacion_gbr=True,
                                       changepoint_features=None,
+                                      growth_driver_feature=None, # Nuevo parámetro para el impulsor
                                       config_gru={
                                           'gru_units': [64, 32], 'dense_units': [16], 'dropout_rate': 0.25,
                                           'bidirectional': True, 'use_attention': False, 'attention_heads': 2,
@@ -2123,10 +2192,20 @@ def entrenar_modelos_avanzados_continuo(df, modelo_gru_anterior=None, modelo_wav
 
     # --- Preparación de Datos para RNNs (GRU/WaveNet) ---
     # Esta sección prepara los datos para los modelos de redes neuronales,
-    # incluyendo la adición de características de puntos de cambio (changepoints) si están disponibles.
+    # incluyendo la adición de características de puntos de cambio (changepoints) y el impulsor de crecimiento.
     features_list_rnn = [df[columna].values.copy().astype(float)]
     feature_names_rnn = [columna]
     n_features_input_rnn = 1
+
+    # Añadir impulsor de crecimiento si está disponible
+    if growth_driver_feature is not None and not growth_driver_feature.empty:
+        print("  Incorporando impulsor de crecimiento a modelos RNN.")
+        # Asegurarse de que el impulsor esté alineado con el dataframe principal 'df'
+        df_with_driver = pd.merge(df.rename(columns={'Date': 'ds'}), growth_driver_feature, on='ds', how='left').ffill().bfill()
+        features_list_rnn.append(df_with_driver['impulsor_crecimiento'].values.astype(float))
+        feature_names_rnn.append('impulsor_crecimiento')
+        n_features_input_rnn += 1
+
     if changepoint_features is not None and not changepoint_features.empty:
         print("  Incorporando CPs a modelos RNN.")
         df_for_rnn_features = df.copy()
@@ -2174,6 +2253,17 @@ def entrenar_modelos_avanzados_continuo(df, modelo_gru_anterior=None, modelo_wav
             X_gbr_features_list_final = [X_gbr_energy_lags_3d.reshape(num_gbr_samples, -1)]
             for i in range(time_steps_calculado):
                 gbr_feature_names_constructed.append(f"{columna}{'_diff' if gbr_target_is_diff else ''}_lag{i+1}")
+
+            if growth_driver_feature is not None and not growth_driver_feature.empty:
+                print("  Incorporando impulsor de crecimiento a modelo GBR.")
+                df_with_driver_gbr = pd.merge(df.rename(columns={'Date': 'ds'}), growth_driver_feature, on='ds', how='left').ffill().bfill()
+                gbr_driver_series = df_with_driver_gbr['impulsor_crecimiento'].values.astype(float)
+                if len(gbr_driver_series) > time_steps_calculado:
+                    X_gbr_driver_lags, _ = crear_dataset_secuencial(gbr_driver_series.reshape(-1,1), time_steps_calculado)
+                    if X_gbr_driver_lags.shape[0] >= num_gbr_samples:
+                        X_gbr_features_list_final.append(X_gbr_driver_lags[-num_gbr_samples:].reshape(num_gbr_samples, -1))
+                        for i in range(time_steps_calculado):
+                            gbr_feature_names_constructed.append(f"impulsor_crecimiento_lag{i+1}")
 
             if changepoint_features is not None and not changepoint_features.empty:
                 df_for_gbr_cp_features = df.copy()
@@ -2896,7 +2986,19 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, per
         umbral_corr = umbral_sugerido
     regresores = identificar_regresores_no_lineales(df_original_tratada, target_variable=columna_energia, threshold=umbral_corr, metodo=metodo_corr)
 
-    print("\n8. PREPARANDO DATOS PARA PROPHET")
+    print("\n8. CREANDO Y APLICANDO IMPULSOR DE CRECIMIENTO")
+    print("---------------------------------------------")
+    df_impulsor = crear_impulsor_de_crecimiento(df_original_tratada, periodos_futuros, frecuencia)
+    # Unir el impulsor al dataframe principal
+    df_original_tratada = pd.merge(df_original_tratada.rename(columns={'Date': 'ds'}), df_impulsor, on='ds', how='left')
+    df_original_tratada = df_original_tratada.rename(columns={'ds': 'Date'})
+    # Añadir el impulsor a la lista de regresores para que Prophet lo use
+    if 'impulsor_crecimiento' not in regresores:
+        regresores.append('impulsor_crecimiento')
+        print("  'impulsor_crecimiento' añadido a la lista de regresores.")
+
+
+    print("\n9. PREPARANDO DATOS PARA PROPHET")
     print("------------------------------")
     df_prophet = preparar_datos_para_prophet(df_original_tratada, columna_energia, regresores, growth_type, frecuencia)
 
@@ -2989,6 +3091,7 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, per
         epocas=100, val_split=0.15, batch_size=32, id_datos=id_datos_col, frecuencia=frecuencia,
         usar_diferenciacion_gbr=usar_diferenciacion_gbr_bool,
         changepoint_features=changepoint_features_for_rnn_gbr,
+        growth_driver_feature=df_impulsor, # Pasar el impulsor a la función de entrenamiento
         config_gru=mi_config_gru, config_wavenet=mi_config_wavenet, config_gbr=mi_config_gbr,
         use_reduce_lr_plateau=True, early_stopping_patience=15
     )
@@ -3016,14 +3119,23 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, per
 
     predicciones_gru = predicciones_wavenet = predicciones_gbr = None
     datos_hist_energia = df_original_tratada[columna_energia].values
+    # Preparar features futuras para los modelos avanzados
+    features_futuras_avanzadas = {}
+    if changepoint_features_for_rnn_gbr is not None:
+        features_futuras_avanzadas['changepoint_features_futuras'] = changepoint_features_for_rnn_gbr
+    if df_impulsor is not None:
+        # Asegurarse que el impulsor solo contiene las fechas futuras
+        impulsor_futuro = df_impulsor[df_impulsor['ds'] > ultima_fecha_historica].copy()
+        features_futuras_avanzadas['growth_driver_feature_futuro'] = impulsor_futuro
+
     if 'gru_avanzado' in modelos_avanzados_entrenados:
-        predicciones_gru = predecir_con_rnn(modelos_avanzados_entrenados['gru_avanzado'], datos_hist_energia, periodos_futuros, frecuencia=frecuencia, changepoint_features_futuras=changepoint_features_for_rnn_gbr)
+        predicciones_gru = predecir_con_rnn(modelos_avanzados_entrenados['gru_avanzado'], datos_hist_energia, periodos_futuros, frecuencia=frecuencia, **features_futuras_avanzadas)
         print("Predicciones GRU (futuras) generadas.")
     if 'wavenet' in modelos_avanzados_entrenados:
-        predicciones_wavenet = predecir_con_rnn(modelos_avanzados_entrenados['wavenet'], datos_hist_energia, periodos_futuros, frecuencia=frecuencia, changepoint_features_futuras=changepoint_features_for_rnn_gbr)
+        predicciones_wavenet = predecir_con_rnn(modelos_avanzados_entrenados['wavenet'], datos_hist_energia, periodos_futuros, frecuencia=frecuencia, **features_futuras_avanzadas)
         print("Predicciones WaveNet (futuras) generadas.")
     if 'gradient_boosting' in modelos_avanzados_entrenados:
-        predicciones_gbr = predecir_con_gbr(modelos_avanzados_entrenados['gradient_boosting'], datos_hist_energia, periodos_futuros, frecuencia=frecuencia, changepoint_features_futuras=changepoint_features_for_rnn_gbr)
+        predicciones_gbr = predecir_con_gbr(modelos_avanzados_entrenados['gradient_boosting'], datos_hist_energia, periodos_futuros, frecuencia=frecuencia, **features_futuras_avanzadas)
         print("Predicciones GBR (futuras) generadas.")
 
     print("\n15. COMPARANDO PREDICCIONES INDIVIDUALES FUTURAS")
