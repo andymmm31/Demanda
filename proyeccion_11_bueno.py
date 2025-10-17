@@ -3057,8 +3057,21 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, per
             ajuste_adicional=ajuste_adicional, frecuencia=frecuencia
         )
 
-    print("\n13. ENTRENANDO MODELOS AVANZADOS (GRU, WAVENET, GBR)")
-    print("--------------------------------------------------")
+    print("\n13. PREPARANDO DATOS PARA MODELOS AVANZADOS (RESIDUOS DE PROPHET)")
+    print("-----------------------------------------------------------------")
+    # Calcular los residuos de Prophet sobre los datos históricos
+    df_train_prophet = forecast_prophet[forecast_prophet['ds'] <= df_prophet_con_cp['ds'].max()]
+    residuos = df_prophet_con_cp['y'] - df_train_prophet['yhat']
+
+    # Crear un nuevo DataFrame para entrenar los modelos avanzados, usando los residuos como target
+    df_avanzado_train = df_original_tratada.copy()
+    # Reemplazar la columna de energía con los residuos. Le cambiamos el nombre para claridad.
+    df_avanzado_train[columna_energia] = residuos.values
+    print(f"Residuos calculados. Min: {residuos.min():.2f}, Max: {residuos.max():.2f}, Media: {residuos.mean():.2f}")
+
+
+    print("\n14. ENTRENANDO MODELOS AVANZADOS (GRU, WAVENET, GBR) SOBRE RESIDUOS")
+    print("------------------------------------------------------------------")
     # Las variables usar_diferenciacion_gbr_bool, use_attention_gru_bool y gbr_loss_input
     # ya se obtienen del input del usuario al inicio de esta función.
     # Las siguientes líneas eran incorrectas y han sido eliminadas.
@@ -3082,7 +3095,7 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, per
     }
 
     modelos_avanzados_entrenados, time_steps_usados, validation_predictions = entrenar_modelos_avanzados_continuo(
-        df=df_original_tratada, modelo_gru_anterior=modelos_anteriores.get('gru_model'),
+        df=df_avanzado_train, modelo_gru_anterior=modelos_anteriores.get('gru_model'),
         modelo_wavenet_anterior=modelos_anteriores.get('wavenet_model'),
         modelo_gbr_anterior=modelos_anteriores.get('gbr_model'), columna=columna_energia,
         epocas=100, val_split=0.15, batch_size=32, id_datos=id_datos_col, frecuencia=frecuencia,
@@ -3125,16 +3138,19 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, per
         features_futuras_avanzadas['growth_driver_feature_futuro'] = impulsor_futuro
 
     if 'gru_avanzado' in modelos_avanzados_entrenados:
-        predicciones_gru = predecir_con_rnn(modelos_avanzados_entrenados['gru_avanzado'], datos_hist_energia, periodos_futuros, frecuencia=frecuencia, **features_futuras_avanzadas)
-        print("Predicciones GRU (futuras) generadas.")
+        predicciones_gru_residuos = predecir_con_rnn(modelos_avanzados_entrenados['gru_avanzado'], residuos, periodos_futuros, frecuencia=frecuencia, **features_futuras_avanzadas)
+        predicciones_gru = forecast_prophet_futuro['yhat'].values + predicciones_gru_residuos
+        print("Predicciones GRU (futuras) generadas a partir de residuos.")
     if 'wavenet' in modelos_avanzados_entrenados:
-        predicciones_wavenet = predecir_con_rnn(modelos_avanzados_entrenados['wavenet'], datos_hist_energia, periodos_futuros, frecuencia=frecuencia, **features_futuras_avanzadas)
-        print("Predicciones WaveNet (futuras) generadas.")
+        predicciones_wavenet_residuos = predecir_con_rnn(modelos_avanzados_entrenados['wavenet'], residuos, periodos_futuros, frecuencia=frecuencia, **features_futuras_avanzadas)
+        predicciones_wavenet = forecast_prophet_futuro['yhat'].values + predicciones_wavenet_residuos
+        print("Predicciones WaveNet (futuras) generadas a partir de residuos.")
     if 'gradient_boosting' in modelos_avanzados_entrenados:
-        predicciones_gbr = predecir_con_gbr(modelos_avanzados_entrenados['gradient_boosting'], datos_hist_energia, periodos_futuros, frecuencia=frecuencia, **features_futuras_avanzadas)
-        print("Predicciones GBR (futuras) generadas.")
+        predicciones_gbr_residuos = predecir_con_gbr(modelos_avanzados_entrenados['gradient_boosting'], residuos, periodos_futuros, frecuencia=frecuencia, **features_futuras_avanzadas)
+        predicciones_gbr = forecast_prophet_futuro['yhat'].values + predicciones_gbr_residuos
+        print("Predicciones GBR (futuras) generadas a partir de residuos.")
 
-    print("\n15. COMPARANDO PREDICCIONES INDIVIDUALES FUTURAS")
+    print("\n16. COMPARANDO PREDICCIONES INDIVIDUALES FUTURAS")
     print("------------------------------------------------")
     plt.figure(figsize=(15, 8))
     plt.plot(df_original_tratada['Date'], df_original_tratada[columna_energia], label='Histórico (Tratado)', alpha=0.7, marker='o', markersize=2, color='black')
