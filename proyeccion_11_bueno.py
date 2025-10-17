@@ -2957,6 +2957,9 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, per
     print("------------------------")
     analisis_estadistico_energia(df_original_tratada, columna_energia=columna_energia, frecuencia=frecuencia)
 
+    # Definir eventos especiales específicos para esta columna, después de ver el gráfico
+    eventos_especiales = definir_eventos_especiales(frecuencia)
+
     print("\n4. ANALIZANDO CORRELACIONES")
     print("-------------------------")
     visualizar_matriz_correlacion_no_lineal(df_original_tratada, metodo='spearman')
