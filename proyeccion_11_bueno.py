@@ -2120,7 +2120,6 @@ def entrenar_modelos_avanzados_continuo(df, modelo_gru_anterior=None, modelo_wav
                                       batch_size=32, id_datos=None, frecuencia='mensual',
                                       usar_diferenciacion_gbr=True,
                                       changepoint_features=None,
-                                      growth_driver_feature=None, # Nuevo parámetro para el impulsor
                                       config_gru={
                                           'gru_units': [64, 32], 'dense_units': [16], 'dropout_rate': 0.25,
                                           'bidirectional': True, 'use_attention': False, 'attention_heads': 2,
@@ -2198,11 +2197,9 @@ def entrenar_modelos_avanzados_continuo(df, modelo_gru_anterior=None, modelo_wav
     n_features_input_rnn = 1
 
     # Añadir impulsor de crecimiento si está disponible
-    if growth_driver_feature is not None and not growth_driver_feature.empty:
+    if 'impulsor_crecimiento' in df.columns:
         print("  Incorporando impulsor de crecimiento a modelos RNN.")
-        # Asegurarse de que el impulsor esté alineado con el dataframe principal 'df'
-        df_with_driver = pd.merge(df.rename(columns={'Date': 'ds'}), growth_driver_feature, on='ds', how='left').ffill().bfill()
-        features_list_rnn.append(df_with_driver['impulsor_crecimiento'].values.astype(float))
+        features_list_rnn.append(df['impulsor_crecimiento'].values.astype(float))
         feature_names_rnn.append('impulsor_crecimiento')
         n_features_input_rnn += 1
 
@@ -2254,10 +2251,9 @@ def entrenar_modelos_avanzados_continuo(df, modelo_gru_anterior=None, modelo_wav
             for i in range(time_steps_calculado):
                 gbr_feature_names_constructed.append(f"{columna}{'_diff' if gbr_target_is_diff else ''}_lag{i+1}")
 
-            if growth_driver_feature is not None and not growth_driver_feature.empty:
+            if 'impulsor_crecimiento' in df.columns:
                 print("  Incorporando impulsor de crecimiento a modelo GBR.")
-                df_with_driver_gbr = pd.merge(df.rename(columns={'Date': 'ds'}), growth_driver_feature, on='ds', how='left').ffill().bfill()
-                gbr_driver_series = df_with_driver_gbr['impulsor_crecimiento'].values.astype(float)
+                gbr_driver_series = df['impulsor_crecimiento'].values.astype(float)
                 if len(gbr_driver_series) > time_steps_calculado:
                     X_gbr_driver_lags, _ = crear_dataset_secuencial(gbr_driver_series.reshape(-1,1), time_steps_calculado)
                     if X_gbr_driver_lags.shape[0] >= num_gbr_samples:
@@ -3092,7 +3088,6 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, per
         epocas=100, val_split=0.15, batch_size=32, id_datos=id_datos_col, frecuencia=frecuencia,
         usar_diferenciacion_gbr=usar_diferenciacion_gbr_bool,
         changepoint_features=changepoint_features_for_rnn_gbr,
-        growth_driver_feature=df_impulsor, # Pasar el impulsor a la función de entrenamiento
         config_gru=mi_config_gru, config_wavenet=mi_config_wavenet, config_gbr=mi_config_gbr,
         use_reduce_lr_plateau=True, early_stopping_patience=15
     )
