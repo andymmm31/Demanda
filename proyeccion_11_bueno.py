@@ -2115,7 +2115,7 @@ def crear_modelo_wavenet(input_shape, n_features=1,
     model.compile(optimizer=optimizer, loss=loss)
     return model
 
-def entrenar_modelos_avanzados_continuo(df, modelo_gru_anterior=None, modelo_wavenet_anterior=None, modelo_gbr_anterior=None,
+def entrenar_modelos_avanzados_continuo(df, forecast_prophet_hist, modelo_gru_anterior=None, modelo_wavenet_anterior=None, modelo_gbr_anterior=None,
                                       columna='Energía', epocas=100, val_split=0.2,
                                       batch_size=32, id_datos=None, frecuencia='mensual',
                                       usar_diferenciacion_gbr=True,
@@ -2425,10 +2425,16 @@ def entrenar_modelos_avanzados_continuo(df, modelo_gru_anterior=None, modelo_wav
                 preds_val_scaled = model.predict(X_val_rnn, verbose=0)
                 temp_pred_full = np.zeros((preds_val_scaled.shape[0], current_scaler_plot_info['n_features']))
                 temp_pred_full[:, current_scaler_plot_info['target_idx']] = preds_val_scaled.flatten()
-                y_val_plot_pred_desnorm = current_scaler_plot_info['scaler'].inverse_transform(temp_pred_full)[:, current_scaler_plot_info['target_idx']]
-                temp_real_full = np.zeros((y_val_rnn.shape[0], current_scaler_plot_info['n_features']))
-                temp_real_full[:, current_scaler_plot_info['target_idx']] = y_val_rnn.flatten()
-                y_val_plot_real_desnorm_target = current_scaler_plot_info['scaler'].inverse_transform(temp_real_full)[:, current_scaler_plot_info['target_idx']]
+                y_preds_residuos_desnorm = current_scaler_plot_info['scaler'].inverse_transform(temp_pred_full)[:, current_scaler_plot_info['target_idx']]
+
+                # Reconstruir el pronóstico completo de validación
+                prophet_val_forecast = forecast_prophet_hist['yhat'].values[split_idx_rnn:len(X_rnn_seq)]
+                y_val_plot_pred_desnorm = prophet_val_forecast + y_preds_residuos_desnorm
+
+                # Obtener los valores reales de energía (no los residuos) para la validación
+                y_real_energia_val = df[columna].values[len(df) - len(y_val_rnn):]
+                y_val_plot_real_desnorm_target = y_real_energia_val
+
 
         elif tipo_modelo == 'gradient_boosting':
             if X_train_gbr is None:
@@ -2448,8 +2454,16 @@ def entrenar_modelos_avanzados_continuo(df, modelo_gru_anterior=None, modelo_wav
             preds_val_scaled = model.predict(X_val_gbr)
             val_loss = mean_squared_error(y_val_gbr_target_scaled_flat, preds_val_scaled)
             print(f"Pérdida GBR (MSE sobre target {'diferenciado' if gbr_target_is_diff else 'original'} escalado): {val_loss:.6f}")
-            y_val_plot_pred_desnorm = scaler_gbr.inverse_transform(preds_val_scaled.reshape(-1, 1)).flatten()
-            y_val_plot_real_desnorm_target = scaler_gbr.inverse_transform(y_val_gbr_target_scaled_flat.reshape(-1, 1)).flatten()
+
+            # Reconstruir el pronóstico completo
+            y_preds_residuos_desnorm = scaler_gbr.inverse_transform(preds_val_scaled.reshape(-1, 1)).flatten()
+            prophet_val_forecast_gbr = forecast_prophet_hist['yhat'].values[len(forecast_prophet_hist) - len(y_preds_residuos_desnorm):]
+            y_val_plot_pred_desnorm = prophet_val_forecast_gbr + y_preds_residuos_desnorm
+
+            # Obtener los valores reales de energía
+            y_real_energia_val_gbr = df[columna].values[len(df) - len(y_preds_residuos_desnorm):]
+            y_val_plot_real_desnorm_target = y_real_energia_val_gbr
+
             current_scaler_plot_info = {'scaler': scaler_gbr, 'n_features': 1, 'target_idx': 0}
             if hasattr(model, 'feature_importances_') and X_train_gbr is not None and gbr_feature_names_constructed and len(model.feature_importances_) == len(gbr_feature_names_constructed):
                 imp = model.feature_importances_
@@ -3095,7 +3109,9 @@ def ejecutar_analisis_para_columna(df_original, columna_energia, frecuencia, per
     }
 
     modelos_avanzados_entrenados, time_steps_usados, validation_predictions = entrenar_modelos_avanzados_continuo(
-        df=df_avanzado_train, modelo_gru_anterior=modelos_anteriores.get('gru_model'),
+        df=df_avanzado_train,
+        forecast_prophet_hist=df_train_prophet, # Pasar el pronóstico histórico de Prophet
+        modelo_gru_anterior=modelos_anteriores.get('gru_model'),
         modelo_wavenet_anterior=modelos_anteriores.get('wavenet_model'),
         modelo_gbr_anterior=modelos_anteriores.get('gbr_model'), columna=columna_energia,
         epocas=100, val_split=0.15, batch_size=32, id_datos=id_datos_col, frecuencia=frecuencia,
